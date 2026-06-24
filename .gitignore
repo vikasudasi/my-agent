@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# User config and secrets
+.env
+config.toml
+
+# Local agent data
+.my-agent/
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+# Chroma / model caches (if created in project)
+chroma_langchain_db/
