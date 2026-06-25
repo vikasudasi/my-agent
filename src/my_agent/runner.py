@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import warnings
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core._api import LangChainBetaWarning
@@ -12,6 +13,13 @@ from langgraph.types import Command
 from my_agent.config import AppConfig, DisplayConfig
 from my_agent.display import TurnStreamPrinter
 from my_agent.memory.chroma_store import ChromaConversationStore
+
+
+@dataclass(frozen=True)
+class ThreadStateInfo:
+    message_count: int
+    human_turn_count: int
+    first_user_message: str | None
 
 warnings.filterwarnings(
     "ignore",
@@ -181,14 +189,50 @@ def _extract_messages(state: Any) -> list[BaseMessage]:
     return [message for message in messages if isinstance(message, BaseMessage)]
 
 
-def _message_count(agent, graph_config: dict[str, Any]) -> int:
+def get_thread_state_info(agent, thread_id: str) -> ThreadStateInfo | None:
+    graph_config = {"configurable": {"thread_id": thread_id}}
     try:
         snapshot = agent.get_state(graph_config)
-        if snapshot and snapshot.values:
-            return len(_extract_messages(snapshot.values))
+        if not snapshot or not snapshot.values:
+            return None
+        messages = _extract_messages(snapshot.values)
     except Exception:
-        pass
-    return 0
+        return None
+
+    first_user: str | None = None
+    human_turn_count = 0
+    for message in messages:
+        if not isinstance(message, HumanMessage):
+            continue
+        human_turn_count += 1
+        if first_user is None:
+            first_user = _message_text(message)
+
+    return ThreadStateInfo(
+        message_count=len(messages),
+        human_turn_count=human_turn_count,
+        first_user_message=first_user,
+    )
+
+
+def _message_count(agent, graph_config: dict[str, Any]) -> int:
+    info = get_thread_state_info(agent, graph_config["configurable"]["thread_id"])
+    return info.message_count if info else 0
+
+
+def _message_text(message: BaseMessage) -> str:
+    content = message.content
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        return "\n".join(part for part in parts if part).strip()
+    return str(content).strip()
 
 
 def _new_messages(

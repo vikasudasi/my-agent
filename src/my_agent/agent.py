@@ -12,9 +12,9 @@ from deepagents.backends import (
     StateBackend,
     StoreBackend,
 )
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.store.memory import InMemoryStore
 
+from my_agent.checkpoint import get_checkpointer
 from my_agent.config import AppConfig, load_config
 from my_agent.memory.chroma_store import ChromaConversationStore
 from my_agent.tools.conversation_memory import build_conversation_tools
@@ -94,6 +94,6 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
         ],
         memory=memory_sources,
         interrupt_on=interrupt_on,
-        checkpointer=MemorySaver(),
+        checkpointer=get_checkpointer(config),
         store=store,
     )

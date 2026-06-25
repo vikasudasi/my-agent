@@ -59,6 +59,12 @@ class DisplayConfig:
 
 
 @dataclass(frozen=True)
+class CheckpointConfig:
+    backend: str = "sqlite"
+    sqlite_path: str = "checkpoints.sqlite"
+
+
+@dataclass(frozen=True)
 class AppConfig:
     llm: LLMConfig
     agent: AgentConfig
@@ -67,6 +73,7 @@ class AppConfig:
     memory: MemoryConfig
     tavily: TavilyConfig
     display: DisplayConfig
+    checkpoint: CheckpointConfig
     project_root: Path
     agents_md_path: Path
 
@@ -111,6 +118,7 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
     memory_section = raw.get("memory", {})
     tavily_section = raw.get("tavily", {})
     display_section = raw.get("display", {})
+    checkpoint_section = raw.get("checkpoint", {})
 
     model = llm_section.get("model", "").strip()
     if not model:
@@ -182,6 +190,12 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
             show_tool_results=bool(display_section.get("show_tool_results", True)),
             show_skills=bool(display_section.get("show_skills", True)),
             tool_result_max_chars=int(display_section.get("tool_result_max_chars", 500)),
+        ),
+        checkpoint=CheckpointConfig(
+            backend=str(checkpoint_section.get("backend", "sqlite")).strip().lower(),
+            sqlite_path=str(
+                checkpoint_section.get("sqlite_path", "checkpoints.sqlite")
+            ),
         ),
         project_root=project_root,
         agents_md_path=agents_md_path,

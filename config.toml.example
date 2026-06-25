@@ -17,6 +17,11 @@ skills_user_dir = "~/.my-agent/skills"
 skills_project_dir = "./skills"
 chroma_dir = "~/.my-agent/chroma"
 
+[checkpoint]
+# "sqlite" persists chat threads across restarts; "memory" is in-process only.
+backend = "sqlite"
+sqlite_path = "checkpoints.sqlite"
+
 [memory]
 collection_name = "conversations"
 embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
