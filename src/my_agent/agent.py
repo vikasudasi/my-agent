@@ -12,13 +12,12 @@ from deepagents.backends import (
     StateBackend,
     StoreBackend,
 )
-from langgraph.store.memory import InMemoryStore
-
 from my_agent.checkpoint import get_checkpointer
 from my_agent.config import AppConfig, load_config
 from my_agent.memory.chroma_store import ChromaConversationStore
 from my_agent.tools.conversation_memory import build_conversation_tools
 from my_agent.tools.fetch_page import fetch_page
+from my_agent.store import get_store
 from my_agent.tools.tavily_search import build_tavily_tools
 
 
@@ -46,7 +45,7 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
         if path_entry not in shell_env.get("PATH", ""):
             shell_env["PATH"] = f"{path_entry}:{shell_env.get('PATH', '')}"
 
-    store = InMemoryStore()
+    store = get_store(config)
     backend = CompositeBackend(
         default=LocalShellBackend(
             root_dir=home,

@@ -65,6 +65,12 @@ class CheckpointConfig:
 
 
 @dataclass(frozen=True)
+class StoreConfig:
+    backend: str = "sqlite"
+    sqlite_path: str = "store.sqlite"
+
+
+@dataclass(frozen=True)
 class AppConfig:
     llm: LLMConfig
     agent: AgentConfig
@@ -74,6 +80,7 @@ class AppConfig:
     tavily: TavilyConfig
     display: DisplayConfig
     checkpoint: CheckpointConfig
+    store: StoreConfig
     project_root: Path
     agents_md_path: Path
 
@@ -119,6 +126,7 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
     tavily_section = raw.get("tavily", {})
     display_section = raw.get("display", {})
     checkpoint_section = raw.get("checkpoint", {})
+    store_section = raw.get("store", {})
 
     model = llm_section.get("model", "").strip()
     if not model:
@@ -196,6 +204,10 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
             sqlite_path=str(
                 checkpoint_section.get("sqlite_path", "checkpoints.sqlite")
             ),
+        ),
+        store=StoreConfig(
+            backend=str(store_section.get("backend", "sqlite")).strip().lower(),
+            sqlite_path=str(store_section.get("sqlite_path", "store.sqlite")),
         ),
         project_root=project_root,
         agents_md_path=agents_md_path,

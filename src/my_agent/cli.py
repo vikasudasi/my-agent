@@ -10,6 +10,7 @@ from my_agent.agent import get_runtime
 from my_agent.checkpoint import get_latest_thread_id, list_threads
 from my_agent.config import DisplayConfig, load_config
 from my_agent.runner import get_thread_state_info, run_turn
+from my_agent.store import list_memories, read_memory
 
 app = typer.Typer(
     name="my-agent",
@@ -17,7 +18,9 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 threads_app = typer.Typer(help="Inspect and manage saved chat threads.")
+memories_app = typer.Typer(help="Inspect agent memory files under /memories/.")
 app.add_typer(threads_app, name="threads")
+app.add_typer(memories_app, name="memories")
 
 
 def _resolve_config_path(config: Optional[Path]) -> str | None:
@@ -137,6 +140,72 @@ def threads_list(
         if thread.message_count:
             typer.echo(f"   messages={thread.message_count}")
         typer.echo(f"   first_user_message: {_snippet(thread.first_user_message)}")
+
+
+@memories_app.command("list")
+def memories_list(
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        help="Path to config.toml (default: ./config.toml).",
+        exists=True,
+        dir_okay=False,
+        resolve_path=True,
+    ),
+    limit: int = typer.Option(
+        50,
+        "--limit",
+        min=1,
+        help="Maximum number of memory files to show.",
+    ),
+) -> None:
+    """List persisted files under /memories/ (newest first)."""
+    config_path = _resolve_config_path(config)
+    app_config = load_config(Path(config_path) if config_path else None)
+    files = list_memories(app_config, limit=limit)
+
+    if not files:
+        typer.echo("No memory files saved yet.")
+        typer.echo("The agent can write durable notes to paths like /memories/user.md.")
+        raise typer.Exit(0)
+
+    typer.echo(f"Memory files ({len(files)}):")
+    for index, entry in enumerate(files, start=1):
+        updated = entry.updated_at or "unknown"
+        typer.echo(f"{index}. {entry.path}")
+        typer.echo(f"   updated={updated}  size={entry.size} bytes")
+        if entry.snippet:
+            typer.echo(f"   snippet: {entry.snippet}")
+
+
+@memories_app.command("read")
+def memories_read(
+    path: str = typer.Argument(
+        ...,
+        help="Virtual memory path (e.g. /memories/user.md).",
+    ),
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        help="Path to config.toml (default: ./config.toml).",
+        exists=True,
+        dir_okay=False,
+        resolve_path=True,
+    ),
+) -> None:
+    """Print the contents of a /memories/ file."""
+    config_path = _resolve_config_path(config)
+    app_config = load_config(Path(config_path) if config_path else None)
+    try:
+        content = read_memory(app_config, path)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    if content is None:
+        typer.echo(f"No memory file at {path!r}.")
+        raise typer.Exit(1)
+
+    typer.echo(content)
 
 
 @app.command()

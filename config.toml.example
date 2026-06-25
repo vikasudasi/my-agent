@@ -22,6 +22,11 @@ chroma_dir = "~/.my-agent/chroma"
 backend = "sqlite"
 sqlite_path = "checkpoints.sqlite"
 
+[store]
+# "sqlite" persists /memories/ files across restarts; "memory" is in-process only.
+backend = "sqlite"
+sqlite_path = "store.sqlite"
+
 [memory]
 collection_name = "conversations"
 embedding_model = "sentence-transformers/all-MiniLM-L6-v2"

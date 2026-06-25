@@ -57,51 +57,129 @@ Key `config.toml` sections:
 | `[agent]` | Home directory root (`~`) and optional system prompt override |
 | `[security]` | `require_approval` — prompt before destructive shell/file actions |
 | `[checkpoint]` | Thread persistence (`sqlite` or `memory`) |
+| `[store]` | `/memories/` persistence (`sqlite` or `memory`) |
 | `[memory]` | Chroma collection and embedding model |
 | `[tavily]` | Web search defaults |
 | `[display]` | Streaming verbosity defaults |
 
 Local state is stored under `~/.my-agent/` by default (checkpoints, Chroma, user skills).
 
-## Usage
+## CLI reference
 
-### Chat
-
-```bash
-# New conversation
-my-agent chat
-
-# Resume the most recent thread
-my-agent chat --continue
-
-# Resume a specific thread
-my-agent chat --thread-id <uuid>
-
-# Show reasoning and tool activity
-my-agent chat --verbose
-
-# Hide internal activity
-my-agent chat --quiet
+```
+my-agent
+├── chat              Interactive REPL
+├── run <task>        One-shot task
+├── threads list      List saved chat threads
+└── memories
+    ├── list          List /memories/ files
+    └── read <path>   Print a /memories/ file
 ```
 
-### One-shot run
+Global options are available on every command:
+
+| Option | Description |
+|--------|-------------|
+| `--config FILE` | Path to `config.toml` (default: `./config.toml`) |
+| `--help` | Show command help |
+
+### `my-agent chat`
+
+Interactive REPL. Each session gets a `thread_id` printed at startup. Type `exit` or `quit` to leave.
+
+| Option | Description |
+|--------|-------------|
+| `--thread-id TEXT` | Resume a specific saved thread |
+| `--continue` | Resume the most recently updated thread |
+| `--verbose` | Show reasoning, tool calls, tool results, and loaded skills |
+| `--quiet` | Hide reasoning, tool calls, tool results, and loaded skills |
+
+`--continue` and `--thread-id` cannot be used together. When resuming a thread with history, the banner shows message count (e.g. `Resuming thread <uuid> (12 messages)`).
+
+```bash
+my-agent chat
+my-agent chat --continue
+my-agent chat --thread-id 0353da51-f909-4144-b95a-52db1ea8986f
+my-agent chat --verbose
+my-agent chat --quiet
+my-agent chat --config /path/to/config.toml
+```
+
+### `my-agent run`
+
+Run a single task and exit. Useful for scripts and one-off prompts.
+
+| Option | Description |
+|--------|-------------|
+| `--thread-id TEXT` | Attach to an existing thread (default: new UUID) |
+| `--continue` | Use the most recently updated thread |
+| `--verbose` | Show reasoning, tool calls, tool results, and loaded skills |
+| `--quiet` | Hide reasoning, tool calls, tool results, and loaded skills |
 
 ```bash
 my-agent run "List the five largest files in my Downloads folder"
 my-agent run --continue "Now sort them by date"
+my-agent run --verbose "What were the biggest AI news stories this week?"
 ```
 
-### Thread management
+### `my-agent threads list`
+
+List chat threads saved in the checkpoint database (newest first). Shows `thread_id`, last updated time, message count, and first user message snippet.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--limit N` | `20` | Maximum threads to show |
 
 ```bash
-# List saved threads (newest first)
 my-agent threads list
-
-# Limit results
 my-agent threads list --limit 10
 ```
 
-Type `exit` or `quit` to leave interactive chat.
+Use the `thread_id` from this output with `my-agent chat --thread-id <id>` to resume a conversation.
+
+### `my-agent memories list`
+
+List files the agent has written under `/memories/` (persisted in `store.sqlite`). Shows path, updated time, size, and a content snippet.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--limit N` | `50` | Maximum files to show |
+
+```bash
+my-agent memories list
+my-agent memories list --limit 20
+```
+
+### `my-agent memories read`
+
+Print the full contents of a `/memories/` file.
+
+| Argument | Description |
+|----------|-------------|
+| `PATH` | Virtual path, e.g. `/memories/user.md` |
+
+```bash
+my-agent memories read /memories/user.md
+my-agent memories read /memories/preferences.md
+```
+
+### Common workflows
+
+```bash
+# Start fresh, note the thread_id printed at startup
+my-agent chat
+
+# Pick up where you left off
+my-agent chat --continue
+
+# Find an older thread to resume
+my-agent threads list
+my-agent chat --thread-id <uuid-from-list>
+
+# Inspect what the agent remembers about you
+my-agent memories list
+my-agent memories read /memories/user.md
+```
 
 ## Memory
 
@@ -110,11 +188,12 @@ The agent uses several memory layers:
 | Layer | Storage | Purpose |
 |-------|---------|---------|
 | **Thread checkpoint** | `~/.my-agent/checkpoints.sqlite` | Exact replay of the current chat (`thread_id`) |
+| **`/memories/` store** | `~/.my-agent/store.sqlite` | Durable agent-written notes (preferences, contacts, facts) |
 | **Chroma** | `~/.my-agent/chroma` | Semantic search across past conversations |
 | **AGENTS.md** | Project root | Always-on operating principles and instructions |
 | **Skills** | `skills/` and `~/.my-agent/skills/` | Repeatable workflows loaded when relevant |
 
-Within a thread, the agent remembers prior turns automatically. Across threads, it can call `search_past_conversations` and related tools to find older context.
+Within a thread, the agent remembers prior turns automatically. Personal facts should be saved under `/memories/` (persists across restarts). Across threads, it can call `search_past_conversations` and related tools to find older context.
 
 ## Skills
 
@@ -142,6 +221,7 @@ my-agent/
 ├── src/my_agent/
 │   ├── agent.py           # Deep agent setup
 │   ├── checkpoint.py      # Thread persistence
+│   ├── store.py           # /memories/ persistence
 │   ├── cli.py             # Typer CLI
 │   ├── config.py          # Config loading
 │   ├── display.py         # Streaming output
