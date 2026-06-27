@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from deepagents import create_deep_agent
 from deepagents.backends import (
@@ -12,6 +13,10 @@ from deepagents.backends import (
     StateBackend,
     StoreBackend,
 )
+from deepagents.middleware.skills import SkillsMiddleware
+from langchain.agents.middleware.types import AgentMiddleware
+from langgraph.runtime import Runtime
+from langchain_core.runnables import RunnableConfig
 from my_agent.checkpoint import get_checkpointer
 from my_agent.config import AppConfig, load_config
 from my_agent.memory.chroma_store import ChromaConversationStore
@@ -19,6 +24,29 @@ from my_agent.tools.conversation_memory import build_conversation_tools
 from my_agent.tools.fetch_page import fetch_page
 from my_agent.store import get_store
 from my_agent.tools.tavily_search import build_tavily_tools
+
+
+class _RefreshSkillsMiddleware(AgentMiddleware):
+    """Forces skills re-scan on every session start, even when --continue
+    restores checkpointed state containing stale skills_metadata.
+
+    SkillsMiddleware skips loading if 'skills_metadata' is already present
+    in checkpointed state. This middleware clears that key before
+    SkillsMiddleware's before_agent runs, ensuring newly added skills on
+    disk are always picked up.
+    """
+
+    def before_agent(
+        self, state: dict[str, Any], runtime: Runtime, config: RunnableConfig
+    ) -> dict[str, Any] | None:
+        if "skills_metadata" in state:
+            return {"skills_metadata": []}
+        return None
+
+    async def abefore_agent(
+        self, state: dict[str, Any], runtime: Runtime, config: RunnableConfig
+    ) -> dict[str, Any] | None:
+        return self.before_agent(state, runtime, config)
 
 
 @lru_cache(maxsize=4)
@@ -82,14 +110,20 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
     # Memory sources: all existing AGENTS.md files are injected
     memory_sources = [str(p) for p in config.agents_md_paths] or None
 
+    # Build skills middleware stack: refresh clears cached metadata, then SkillsMiddleware re-scans
+    skills_middleware = [
+        _RefreshSkillsMiddleware(),
+        SkillsMiddleware(
+            backend=backend,
+            sources=["/skills/", "/skills/project/"],
+        ),
+    ]
+
     return create_deep_agent(
         model=f"openrouter:{config.llm.model}",
         system_prompt=config.agent.system_prompt,
         backend=backend,
-        skills=[
-            "/skills/",
-            "/skills/project/",
-        ],
+        middleware=skills_middleware,
         tools=[
             fetch_page,
             *build_conversation_tools(chroma_store),
