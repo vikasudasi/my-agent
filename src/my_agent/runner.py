@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import warnings
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ warnings.filterwarnings(
     category=LangChainBetaWarning,
     message="The v3 streaming protocol on Pregel is experimental.",
 )
+logging.getLogger("deepagents.middleware.skills").setLevel(logging.ERROR)
 
 
 def run_turn(

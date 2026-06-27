@@ -1855,6 +1855,7 @@ dependencies = [
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
     { name = "python-dotenv" },
+    { name = "rich" },
     { name = "sentence-transformers" },
     { name = "typer" },
 ]
@@ -1871,6 +1872,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=0.3.0" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=2.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "rich", specifier = ">=13.0.0" },
     { name = "sentence-transformers", specifier = ">=3.0.0" },
     { name = "typer", specifier = ">=0.12.0" },
 ]

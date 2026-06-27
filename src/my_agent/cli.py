@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.rule import Rule
 
 from my_agent.agent import get_runtime
 from my_agent.checkpoint import (
@@ -27,6 +30,8 @@ threads_app = typer.Typer(help="Inspect and manage saved chat threads.")
 memories_app = typer.Typer(help="Inspect agent memory files under /memories/.")
 app.add_typer(threads_app, name="threads")
 app.add_typer(memories_app, name="memories")
+
+_console = Console()
 
 
 def _resolve_config_path(config: Optional[Path]) -> str | None:
@@ -74,7 +79,7 @@ def _resolve_thread_id(
         latest = get_latest_thread_id(app_config)
         if latest:
             return latest, True
-        typer.echo("No saved threads found. Starting a new chat.")
+        _console.print("[yellow]No saved threads found. Starting a new chat.[/yellow]")
         return str(uuid.uuid4()), False
 
     if thread_id:
@@ -84,17 +89,28 @@ def _resolve_thread_id(
 
 
 def _print_chat_banner(agent, thread_id: str, *, is_resume: bool) -> None:
-    if not is_resume:
-        typer.echo(f"my-agent chat (thread_id={thread_id})")
-        return
-
-    info = get_thread_state_info(agent, thread_id)
-    if info and info.message_count > 0:
-        typer.echo(
-            f"Resuming thread {thread_id} ({info.message_count} messages)"
+    if is_resume:
+        info = get_thread_state_info(agent, thread_id)
+        msg_count = f" ({info.message_count} messages)" if info and info.message_count else ""
+        _console.print(
+            Panel(
+                f"[bold]Resuming thread[/bold] {thread_id}{msg_count}\n"
+                "[italic]Type 'exit' or 'quit' to leave[/italic]",
+                title="[bold cyan]my-agent[/bold cyan]",
+                border_style="bright_blue",
+                padding=(1, 2),
+            )
         )
     else:
-        typer.echo(f"my-agent chat (thread_id={thread_id})")
+        _console.print(
+            Panel(
+                f"[dim]thread_id={thread_id}[/dim]\n"
+                "[italic]Type 'exit' or 'quit' to leave[/italic]",
+                title="[bold cyan]my-agent[/bold cyan]  [dim]new session[/dim]",
+                border_style="bright_blue",
+                padding=(1, 2),
+            )
+        )
 
 
 def _initial_turn_index(agent, thread_id: str) -> int:
@@ -147,17 +163,17 @@ def threads_list(
     threads = list_threads(app_config, agent=agent, limit=limit)
 
     if not threads:
-        typer.echo("No saved threads.")
+        _console.print("[yellow]No saved threads.[/yellow]")
         raise typer.Exit(0)
 
-    typer.echo(f"Saved threads ({len(threads)}):")
+    _console.print(f"[bold]Saved threads[/bold] ([cyan]{len(threads)}[/cyan]):")
     for index, thread in enumerate(threads, start=1):
         updated = thread.updated_at or "unknown"
-        typer.echo(f"{index}. thread_id={thread.thread_id}")
-        typer.echo(f"   updated={updated}")
+        _console.print(f"  [cyan]{index}.[/cyan] [bold]thread_id[/bold]={thread.thread_id}")
+        _console.print(f"       updated={updated}")
         if thread.message_count:
-            typer.echo(f"   messages={thread.message_count}")
-        typer.echo(f"   first_user_message: {_snippet(thread.first_user_message)}")
+            _console.print(f"       messages={thread.message_count}")
+        _console.print(f"       first_user_message: [dim]{_snippet(thread.first_user_message)}[/dim]")
 
 
 @threads_app.command("delete")
@@ -189,7 +205,7 @@ def threads_delete(
         )
 
     delete_thread(app_config, thread_id)
-    typer.echo(f"Deleted thread {thread_id}.")
+    _console.print(f"[green]Deleted[/green] thread {thread_id}.")
 
 
 @threads_app.command("prune")
@@ -242,9 +258,9 @@ def threads_prune(
     )
 
     if keep_limit <= 0 and age_limit <= 0:
-        typer.echo(
-            "No retention limits configured. Set [checkpoint].max_threads or "
-            "max_thread_age_days in config.toml, or pass --keep / --max-age-days."
+        _console.print(
+            "[yellow]No retention limits configured[/yellow]. Set [checkpoint].max_threads "
+            "or max_thread_age_days in config.toml, or pass --keep / --max-age-days."
         )
         raise typer.Exit(1)
 
@@ -258,18 +274,18 @@ def threads_prune(
     )
 
     if not result.deleted:
-        typer.echo("No threads to prune.")
+        _console.print("[yellow]No threads to prune.[/yellow]")
         raise typer.Exit(0)
 
     action = "Would delete" if result.dry_run else "Deleted"
-    typer.echo(f"{action} {len(result.deleted)} thread(s):")
+    _console.print(f"[bold]{action}[/bold] [cyan]{len(result.deleted)}[/cyan] thread(s):")
     for thread_id in result.deleted:
-        typer.echo(f"  - {thread_id}")
+        _console.print(f"  [red]-[/red] {thread_id}")
 
     if result.dry_run:
-        typer.echo("\nRe-run without --dry-run to apply.")
+        _console.print("\n[dim]Re-run without --dry-run to apply.[/dim]")
     elif result.vacuumed:
-        typer.echo("Ran SQLite VACUUM on checkpoints database.")
+        _console.print("[green]Ran SQLite VACUUM[/green] on checkpoints database.")
 
 
 @memories_app.command("list")
@@ -295,17 +311,17 @@ def memories_list(
     files = list_memories(app_config, limit=limit)
 
     if not files:
-        typer.echo("No memory files saved yet.")
-        typer.echo("The agent can write durable notes to paths like /memories/user.md.")
+        _console.print("[yellow]No memory files saved yet.[/yellow]")
+        _console.print("The agent can write durable notes to paths like [cyan]/memories/user.md[/cyan].")
         raise typer.Exit(0)
 
-    typer.echo(f"Memory files ({len(files)}):")
+    _console.print(f"[bold]Memory files[/bold] ([cyan]{len(files)}[/cyan]):")
     for index, entry in enumerate(files, start=1):
         updated = entry.updated_at or "unknown"
-        typer.echo(f"{index}. {entry.path}")
-        typer.echo(f"   updated={updated}  size={entry.size} bytes")
+        _console.print(f"  [cyan]{index}.[/cyan] [bold]{entry.path}[/bold]")
+        _console.print(f"       updated={updated}  size={entry.size} bytes")
         if entry.snippet:
-            typer.echo(f"   snippet: {entry.snippet}")
+            _console.print(f"       snippet: [dim]{entry.snippet}[/dim]")
 
 
 @memories_app.command("read")
@@ -332,10 +348,10 @@ def memories_read(
         raise typer.BadParameter(str(exc)) from exc
 
     if content is None:
-        typer.echo(f"No memory file at {path!r}.")
+        _console.print(f"[yellow]No memory file at[/yellow] {path!r}.")
         raise typer.Exit(1)
 
-    typer.echo(content)
+    _console.print(content)
 
 
 @app.command()
@@ -381,17 +397,16 @@ def chat(
     turn_index = _initial_turn_index(agent, active_thread)
 
     _print_chat_banner(agent, active_thread, is_resume=is_resume)
-    typer.echo("Type 'exit' or 'quit' to leave.\n")
 
     while True:
         try:
-            user_input = typer.prompt("You")
+            user_input = _console.input("[bold yellow]You:[/bold yellow] ")
         except (EOFError, KeyboardInterrupt):
-            typer.echo("\nBye.")
+            _console.print("\n[dim]Bye.[/dim]")
             raise typer.Exit(0) from None
 
         if user_input.strip().lower() in {"exit", "quit"}:
-            typer.echo("Bye.")
+            _console.print("[dim]Bye.[/dim]")
             break
 
         turn_index += 1
@@ -405,6 +420,9 @@ def chat(
             stream=True,
             display=display,
         )
+        _console.print()
+        _console.print(Rule(style="bright_black"))
+        _console.print()
 
 
 @app.command()
@@ -461,7 +479,7 @@ def run(
         display=display,
     )
     if reply and not reply.endswith("\n"):
-        typer.echo("")
+        _console.print("")
 
 
 if __name__ == "__main__":

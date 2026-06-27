@@ -4,7 +4,20 @@ import json
 import sys
 from typing import Any, TextIO
 
+from rich.console import Console
+from rich.style import Style
+
 from my_agent.config import DisplayConfig
+
+
+# ── Color & style palette ─────────────────────────────────────────────────
+
+SKILLS_STYLE = Style(color="green", dim=True)
+REASONING_STYLE = Style(color="bright_black", italic=True)
+TOOL_NAME_STYLE = Style(color="cyan", bold=False)
+TOOL_RESULT_STYLE = Style(color="green")
+TOOL_ERROR_STYLE = Style(color="red")
+ASSISTANT_LABEL = "[bold cyan]Assistant:[/bold cyan]"
 
 
 class TurnStreamPrinter:
@@ -17,7 +30,7 @@ class TurnStreamPrinter:
         output: TextIO | None = None,
     ) -> None:
         self._config = config
-        self._out = output or sys.stdout
+        self._console = Console(file=output or sys.stdout, highlight=False)
         self._assistant_header_printed = False
         self._printed_skills: set[str] = set()
         self._pending_tools: list[Any] = []
@@ -62,7 +75,7 @@ class TurnStreamPrinter:
 
         self._printed_skills.update(new_names)
         joined = ", ".join(new_names)
-        self._write(f"[skills loaded] {joined}\n")
+        self._console.print(f"[bold]Skills loaded[/bold]: {joined}", style=SKILLS_STYLE)
 
     def _handle_message_stream(self, stream: Any) -> None:
         self._reasoning_header_printed = False
@@ -71,7 +84,7 @@ class TurnStreamPrinter:
                 if not token:
                     continue
                 if not self._reasoning_header_printed:
-                    self._write("\n[reasoning] ")
+                    self._console.print("Reasoning: ", style=REASONING_STYLE, end="")
                     self._reasoning_header_printed = True
                 self._write(token)
             if self._reasoning_header_printed:
@@ -85,7 +98,7 @@ class TurnStreamPrinter:
             if not token:
                 continue
             if not self._assistant_header_printed:
-                self._write("\nAssistant: ")
+                self._raw_print(ASSISTANT_LABEL, end=" ")
                 self._assistant_header_printed = True
             self._write(token)
 
@@ -120,10 +133,12 @@ class TurnStreamPrinter:
             args = tool_call.get("arguments", {})
         rendered_args = _format_tool_args(args)
         skill_hint = _skill_hint(name, args)
-        line = f"\n[tool] {name}({rendered_args})"
+        line = f"[cyan]{name}[/cyan]"
+        if rendered_args:
+            line += f"({rendered_args})"
         if skill_hint:
-            line += f"  {skill_hint}"
-        self._write(line + "\n")
+            line += f"  [dim]{skill_hint}[/dim]"
+        self._console.print(f"Tool: {line}")
 
     def _flush_completed_tools(self, *, force: bool = False) -> None:
         if not self._config.show_tool_results:
@@ -139,7 +154,9 @@ class TurnStreamPrinter:
             name = getattr(stream, "tool_name", "tool")
             error = getattr(stream, "error", None)
             if error:
-                self._write(f"[tool error] {name}: {error}\n")
+                self._console.print(
+                    f"Tool error: {name}: {error}", style=TOOL_ERROR_STYLE
+                )
                 continue
 
             output = getattr(stream, "output", None)
@@ -148,14 +165,24 @@ class TurnStreamPrinter:
                     still_pending.append(stream)
                 continue
 
-            rendered = _truncate(_format_tool_output(output), self._config.tool_result_max_chars)
-            self._write(f"[tool result] {name}: {rendered}\n")
+            rendered = _truncate(
+                _format_tool_output(output), self._config.tool_result_max_chars
+            )
+            self._console.print(
+                f"Tool result: [green]{name}[/green]: {rendered}",
+                style=TOOL_RESULT_STYLE,
+            )
 
         self._pending_tools = still_pending
 
     def _write(self, text: str) -> None:
-        self._out.write(text)
-        self._out.flush()
+        """Write raw text to the output stream (used for streaming tokens)."""
+        self._console.file.write(text)
+        self._console.file.flush()
+
+    def _raw_print(self, *args: Any, **kwargs: Any) -> None:
+        """Print rich text through console (used for labels)."""
+        self._console.print(*args, **kwargs)
 
 
 def _format_tool_args(args: Any) -> str:
