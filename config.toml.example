@@ -1,3 +1,13 @@
+# my-agent configuration
+#
+# Resolution order (first-found wins):
+#   1. --config <path> CLI flag
+#   2. ./config.toml (cwd)
+#   3. ~/.my-agent/config.toml (home default)
+#
+# Settings in ~/.my-agent/config.toml act as personal defaults.
+# A ./config.toml in a specific project directory overrides them.
+
 [llm]
 # OpenRouter model slug only — code prefixes with "openrouter:"
 model = "anthropic/claude-sonnet-4-6"
@@ -5,13 +15,16 @@ temperature = 0
 
 [agent]
 root_dir = "~"
-# Optional override; if empty, AGENTS.md content is used as the base system prompt.
+# Optional override; if empty, AGENTS.md content (home + cwd) is used as the
+# base system prompt. When set, it replaces all AGENTS.md content.
 system_prompt = ""
 
 [security]
 require_approval = true
 
 [paths]
+# These directories hold persistent data. Defaults are all under ~/.my-agent/
+# so they are consistent regardless of your working directory.
 agent_state_dir = "~/.my-agent"
 skills_user_dir = "~/.my-agent/skills"
 skills_project_dir = "./skills"

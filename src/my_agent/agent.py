@@ -56,6 +56,10 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
         routes={
             "/.agent/": StateBackend(),
             "/memories/": StoreBackend(namespace=lambda _rt: ("memories",)),
+            "/cwd/": FilesystemBackend(
+                root_dir=str(config.project_root),
+                virtual_mode=True,
+            ),
             "/skills/": FilesystemBackend(
                 root_dir=str(config.paths.skills_user_dir),
                 virtual_mode=True,
@@ -75,8 +79,8 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
             "edit_file": True,
         }
 
-    agents_md = str(config.agents_md_path)
-    memory_sources = [agents_md] if config.agents_md_path.is_file() else None
+    # Memory sources: all existing AGENTS.md files are injected
+    memory_sources = [str(p) for p in config.agents_md_paths] or None
 
     return create_deep_agent(
         model=f"openrouter:{config.llm.model}",

@@ -8,6 +8,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+_HOME_AGENT_DIR = Path.home() / ".my-agent"
+
+
 @dataclass(frozen=True)
 class LLMConfig:
     model: str
@@ -83,8 +86,12 @@ class AppConfig:
     display: DisplayConfig
     checkpoint: CheckpointConfig
     store: StoreConfig
-    project_root: Path
-    agents_md_path: Path
+    project_root: Path  # cwd at agent startup
+    cwd: Path  # current working directory (same as project_root for now, separate for clarity)
+    home_agent_dir: Path  # ~/.my-agent resolved
+    agents_md_paths: tuple[Path, ...]  # all existing AGENTS.md paths (home first, then cwd)
+    config_dir: Path  # directory of the loaded config.toml
+    has_cwd_skills: bool  # whether ./skills exists
 
 
 def _expand_path(value: str, base: Path) -> Path:
@@ -95,27 +102,80 @@ def _expand_path(value: str, base: Path) -> Path:
     return path
 
 
-def _read_agents_md(project_root: Path) -> str:
-    agents_md = project_root / "AGENTS.md"
-    if agents_md.is_file():
-        return agents_md.read_text(encoding="utf-8").strip()
-    return "You are a helpful personal macOS assistant."
+def _read_agents_md(file_path: Path) -> str | None:
+    if file_path.is_file():
+        return file_path.read_text(encoding="utf-8").strip()
+    return None
+
+
+def _build_system_prompt(
+    configured_prompt: str,
+    home_agents: str | None,
+    cwd_agents: str | None,
+) -> str:
+    """Combine AGENTS.md contents with optional configured prompt override.
+
+    Order: home AGENTS.md first, then cwd AGENTS.md (so cwd rules can
+    supplement or refine personal rules). A configured prompt in config.toml
+    replaces all file-based content.
+    """
+    if configured_prompt:
+        return configured_prompt
+
+    parts: list[str] = []
+    for content in (home_agents, cwd_agents):
+        if content and content not in parts:
+            parts.append(content)
+
+    if not parts:
+        return "You are a helpful personal macOS assistant."
+
+    return "\n\n---\n\n".join(parts)
 
 
 def load_config(config_path: Path | None = None, env_path: Path | None = None) -> AppConfig:
     project_root = Path.cwd().resolve()
-    config_file = config_path or (project_root / "config.toml")
-    if not config_file.is_file():
-        example = project_root / "config.toml.example"
-        if example.is_file():
-            raise FileNotFoundError(
-                f"Missing {config_file}. Copy config.toml.example to config.toml and edit it."
-            )
-        raise FileNotFoundError(f"Missing config file: {config_file}")
+    home_agent = _HOME_AGENT_DIR.resolve()
 
-    dotenv_file = env_path or (project_root / ".env")
-    if dotenv_file.is_file():
-        load_dotenv(dotenv_file)
+    # ------------------------------------------------------------------
+    # 1. Config file: --config > ./config.toml > ~/.my-agent/config.toml
+    # ------------------------------------------------------------------
+    if config_path is not None:
+        config_file = config_path.resolve()
+    else:
+        cwd_config = project_root / "config.toml"
+        home_config = home_agent / "config.toml"
+        if cwd_config.is_file():
+            config_file = cwd_config
+        elif home_config.is_file():
+            config_file = home_config
+        else:
+            example = project_root / "config.toml.example"
+            if example.is_file():
+                raise FileNotFoundError(
+                    f"Missing config.toml. Copy config.toml.example to one of:\n"
+                    f"  {cwd_config}\n"
+                    f"  {home_config}\n"
+                    "then edit it."
+                )
+            raise FileNotFoundError(
+                f"Missing config file. Create {cwd_config} or {home_config}."
+            )
+
+    config_dir = config_file.parent.resolve()
+
+    # ------------------------------------------------------------------
+    # 2. Dotenv: system env first, then ~/.my-agent/.env, then ./.env overrides
+    # ------------------------------------------------------------------
+    dotenv_file = env_path
+    if dotenv_file is None:
+        home_dotenv = home_agent / ".env"
+        cwd_dotenv = project_root / ".env"
+        # Load home first, cwd overrides
+        if home_dotenv.is_file():
+            load_dotenv(home_dotenv)
+        if cwd_dotenv.is_file():
+            load_dotenv(cwd_dotenv, override=True)
 
     with config_file.open("rb") as handle:
         raw = tomllib.load(handle)
@@ -140,10 +200,30 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
             "OPENROUTER_API_KEY is not set. Add it to .env (see .env.example)."
         )
 
-    agents_md_path = project_root / "AGENTS.md"
-    configured_prompt = agent_section.get("system_prompt", "").strip()
-    system_prompt = configured_prompt or _read_agents_md(project_root)
+    # ------------------------------------------------------------------
+    # 3. AGENTS.md paths (home first, cwd second)
+    # ------------------------------------------------------------------
+    cwd_agents_md = project_root / "AGENTS.md"
+    home_agents_md = home_agent / "AGENTS.md"
+    home_agents_content = _read_agents_md(home_agents_md)
+    cwd_agents_content = _read_agents_md(cwd_agents_md)
 
+    agents_md_paths: tuple[Path, ...] = ()
+    if home_agents_content is not None:
+        agents_md_paths += (home_agents_md,)
+    if cwd_agents_content is not None and (
+        not agents_md_paths or cwd_agents_md != agents_md_paths[-1]
+    ):
+        agents_md_paths += (cwd_agents_md,)
+
+    configured_prompt = agent_section.get("system_prompt", "").strip()
+    system_prompt = _build_system_prompt(
+        configured_prompt, home_agents_content, cwd_agents_content
+    )
+
+    # ------------------------------------------------------------------
+    # 4. Paths
+    # ------------------------------------------------------------------
     paths = PathsConfig(
         agent_state_dir=_expand_path(
             paths_section.get("agent_state_dir", "~/.my-agent"), project_root
@@ -167,6 +247,14 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
     ):
         directory.mkdir(parents=True, exist_ok=True)
 
+    # ------------------------------------------------------------------
+    # 5. Check if .cwd skills exist
+    # ------------------------------------------------------------------
+    has_cwd_skills = (project_root / "skills").is_dir()
+
+    # ------------------------------------------------------------------
+    # 6. Build AppConfig
+    # ------------------------------------------------------------------
     return AppConfig(
         llm=LLMConfig(
             model=model,
@@ -216,5 +304,9 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
             sqlite_path=str(store_section.get("sqlite_path", "store.sqlite")),
         ),
         project_root=project_root,
-        agents_md_path=agents_md_path,
+        cwd=project_root,
+        home_agent_dir=home_agent,
+        agents_md_paths=agents_md_paths,
+        config_dir=config_dir,
+        has_cwd_skills=has_cwd_skills,
     )

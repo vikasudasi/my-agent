@@ -17,6 +17,7 @@ Use the right store for each kind of information:
 |-------|--------------|---------|
 | **`AGENTS.md`** | Project file (also injected into system prompt) | Project-wide operating rules, tool conventions, repo-specific behavior |
 | **`/memories/`** | `/memories/{name}.md` | Personal user facts, preferences, contacts — private, durable, under `~/.my-agent/` |
+| **`/cwd/`** | `/cwd/{relative-path}` | Current working directory at agent startup — for ad-hoc file access. |
 | **Chroma tools** | `search_past_conversations`, etc. | Finding old *conversations*, not structured preferences |
 
 **When to write `/memories/`**
@@ -35,7 +36,24 @@ Use the right store for each kind of information:
 
 **Do not store** API keys, passwords, or credentials in any file or memory.
 
-At the start of a new thread, `read_file` on `/memories/user.md` (if it exists) when personal context may matter.
+At the start of a new thread, `read_file` on `/memories/user.md` (if it exists) when personal context may matter. You can also check `/cwd/AGENTS.md` in the current project directory for project-specific rules.
+
+## Path resolution order
+
+When my-agent starts from any working directory, files are resolved in this order:
+
+| Resource | Resolution | Detail |
+|----------|------------|--------|
+| **`config.toml`** | `--config` CLI > `./config.toml` > `~/.my-agent/config.toml` | First-found wins. |
+| **`.env`** | `~/.my-agent/.env` then `./.env` (cwd overrides home) | Both loaded; cwd values override. |
+| **`AGENTS.md` (memory)** | `~/.my-agent/AGENTS.md` **and** `./AGENTS.md` | Both injected into system prompt when they exist; home rules come first. |
+| **User skills** | `~/.my-agent/skills/{name}/SKILL.md` | Always loaded. |
+| **Project skills** | `./skills/{name}/SKILL.md` | Loaded when the directory exists. |
+| **Checkpoints** | `~/.my-agent/checkpoints.sqlite` (or `[checkpoint].sqlite_path`) | Always stored in `agent_state_dir` (~/.my-agent/ by default). |
+| **`/memories/` store** | `~/.my-agent/store.sqlite` (or `[store].sqlite_path`) | Always stored in `agent_state_dir`. |
+| **Chroma DB** | `~/.my-agent/chroma/` (or `[paths].chroma_dir`) | Always in `agent_state_dir`. |
+
+This means you can run `my-agent chat` from any project directory and it will automatically pick up project-local config while sharing the same global checkpoints, memories, and skills.
 
 ## Skills
 
@@ -49,6 +67,16 @@ When a task is repeatable (same workflow, tooling, or domain steps), create or u
 6. After creating or updating a skill, tell the user the path and a one-line summary.
 
 Load existing skills automatically when a task matches their description.
+
+## Virtual paths (the `/cwd/` route)
+
+The backend exposes a `/cwd/` virtual filesystem route pointing to the current working directory. Use it like any other path:
+
+- `/cwd/src/main.py` — read a source file
+- `/cwd/tests/` — list files in the tests directory
+- `/cwd/Makefile` — read a build file
+
+This is useful when you need to work with files in the user's project without leaving the virtual filesystem.
 
 ## macOS notes
 

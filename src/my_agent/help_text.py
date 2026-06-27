@@ -25,7 +25,15 @@ Command tree:
   help [topic]                 This help (e.g. help chat, help threads prune)
 
 Global option (most commands):
-  --config FILE                Path to config.toml (default: ./config.toml)
+  --config FILE                Path to config.toml
+                               (default: ./config.toml -> ~/.my-agent/config.toml)
+
+Config resolution order:
+  1. --config <path> CLI flag
+  2. ./config.toml (project directory)
+  3. ~/.my-agent/config.toml (personal defaults)
+
+Environment: ~/.my-agent/.env then ./.env (cwd overrides home).
 
 Per-command details:
   my-agent help chat

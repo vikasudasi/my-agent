@@ -12,6 +12,7 @@ A local macOS personal assistant built on [LangChain Deep Agents](https://github
 - **Web search** — Tavily integration for live information (optional)
 - **Human-in-the-loop** — optional approval before shell commands and file writes
 - **Verbose mode** — show reasoning, tool calls, tool results, and loaded skills
+- **Portable by design** — run from any directory; global defaults + local overrides
 
 ## Requirements
 
@@ -40,9 +41,47 @@ cp .env.example .env
 my-agent chat
 ```
 
+## Global installation
+
+Install once, use from anywhere:
+
+```bash
+# Activate the venv (adjust path as needed)
+# and add the agent to your PATH
+echo 'export PATH="$HOME/my-agent/.venv/bin:$PATH"' >> ~/.zshrc
+
+# Or symlink as a script entry point:
+# uv pip install -e .   (already done above creates the my-agent entrypoint)
+```
+
+Once installed globally, `my-agent` resolves files in this order:
+
+| Resource | Resolution | Detail |
+|----------|------------|--------|
+| **`config.toml`** | `--config` CLI > `./config.toml` > `~/.my-agent/config.toml` | First-found wins. |
+| **`.env`** | `~/.my-agent/.env` then `./.env` (cwd overrides home) | Both loaded; cwd values override. |
+| **`AGENTS.md` (memory)** | `~/.my-agent/AGENTS.md` **and** `./AGENTS.md` | Both injected into system prompt when they exist. |
+| **User skills** | `~/.my-agent/skills/{name}/SKILL.md` | Always loaded. |
+| **Project skills** | `./skills/{name}/SKILL.md` | Loaded when the directory exists. |
+| **Checkpoints** | `~/.my-agent/checkpoints.sqlite` (or `[checkpoint].sqlite_path`) | Always under `agent_state_dir` (`~/.my-agent/` by default). |
+| **`/memories/` store** | `~/.my-agent/store.sqlite` (or `[store].sqlite_path`) | Always under `agent_state_dir`. |
+| **Chroma DB** | `~/.my-agent/chroma/` (or `[paths].chroma_dir`) | Always under `agent_state_dir`. |
+
+This means you can run `my-agent chat` from any project directory and it will automatically pick up project-local config while sharing the same global checkpoints, memories, and skills across all your projects.
+
 ## Configuration
 
-Copy `config.toml.example` to `config.toml` and edit as needed. Secrets go in `.env`:
+Copy `config.toml.example` to any of these locations:
+
+```bash
+# Personal defaults (used from any directory)
+cp config.toml.example ~/.my-agent/config.toml
+
+# Or project-specific (overrides personal defaults when in this directory)
+cp config.toml.example /path/to/project/config.toml
+```
+
+Secrets go in `.env` — loaded from `~/.my-agent/.env` then overridden by `./.env`:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -62,7 +101,7 @@ Key `config.toml` sections:
 | `[tavily]` | Web search defaults |
 | `[display]` | Streaming verbosity defaults |
 
-Local state is stored under `~/.my-agent/` by default (checkpoints, Chroma, user skills).
+Persistent data lives under `~/.my-agent/` by default (checkpoints, Chroma, memories store, user skills), making it safe to run from any directory.
 
 ## CLI reference
 
@@ -84,7 +123,7 @@ Global options are available on every command:
 
 | Option | Description |
 |--------|-------------|
-| `--config FILE` | Path to `config.toml` (default: `./config.toml`) |
+| `--config FILE` | Path to `config.toml` (default: `./config.toml`, fallback `~/.my-agent/config.toml`) |
 | `--help` | Show Typer help for one command |
 | `my-agent help [topic]` | Full command reference (e.g. `help chat`, `help threads prune`) |
 
@@ -244,6 +283,10 @@ my-agent memories read /memories/user.md
 # Reclaim checkpoint disk space
 my-agent threads prune --dry-run
 my-agent threads prune
+
+# Use from a project directory with project-specific config
+cd ~/projects/my-app
+my-agent chat   # picks up ./config.toml if it exists, or falls back to ~/.my-agent/config.toml
 ```
 
 ## Memory
@@ -255,10 +298,13 @@ The agent uses several memory layers:
 | **Thread checkpoint** | `~/.my-agent/checkpoints.sqlite` | Exact replay of the current chat (`thread_id`) |
 | **`/memories/` store** | `~/.my-agent/store.sqlite` | Durable agent-written notes (preferences, contacts, facts) |
 | **Chroma** | `~/.my-agent/chroma` | Semantic search across past conversations |
-| **AGENTS.md** | Project root | Always-on operating principles and instructions |
+| **AGENTS.md (home)** | `~/.my-agent/AGENTS.md` | Personal operating principles (loaded first into system prompt) |
+| **AGENTS.md (project)** | `./AGENTS.md` | Project-specific rules (loaded second into system prompt) |
 | **Skills** | `skills/` and `~/.my-agent/skills/` | Repeatable workflows loaded when relevant |
 
-Within a thread, the agent remembers prior turns automatically. Personal facts should be saved under `/memories/` (persists across restarts). Across threads, it can call `search_past_conversations` and related tools to find older context.
+Within a thread, the agent remembers prior turns automatically. Personal facts should be saved under `/memories/` (persisted across restarts). Across threads, it can call `search_past_conversations` and related tools to find older context.
+
+When both `~/.my-agent/AGENTS.md` and `./AGENTS.md` exist, both are injected into the system prompt (home first, project second), so project rules can supplement personal rules.
 
 ## Skills
 
@@ -276,6 +322,20 @@ Bundled skills:
 
 See [AGENTS.md](AGENTS.md) for the agent's operating principles.
 
+## Virtual paths in the agent
+
+The agent has access to a virtual filesystem. Paths starting with `/` are routed to different backends:
+
+| Virtual path | Maps to | Description |
+|--------------|---------|-------------|
+| `/memories/` | `~/.my-agent/store.sqlite` (SqliteStore) | Durable agent-written notes |
+| `/cwd/` | Current working directory (filesystem) | Read/write project files |
+| `/skills/` | `~/.my-agent/skills/` | User-scoped skills |
+| `/skills/project/` | `./skills/` | Project-scoped skills |
+| `/.agent/` | Agent state (ephemeral per thread) | Internal agent files |
+
+The `/cwd/` route is especially useful when running from a project directory — you can ask the agent to read, edit, or create files relative to the current directory using paths like `/cwd/src/main.py`.
+
 ## Project structure
 
 ```
@@ -291,6 +351,7 @@ my-agent/
 │   ├── config.py          # Config loading
 │   ├── display.py         # Streaming output
 │   ├── runner.py          # Turn execution
+│   ├── help_text.py       # CLI help text
 │   ├── memory/            # Chroma conversation store
 │   └── tools/             # fetch_page, Tavily, conversation memory
 └── pyproject.toml
