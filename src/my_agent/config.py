@@ -242,7 +242,6 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
     for directory in (
         paths.agent_state_dir,
         paths.skills_user_dir,
-        paths.skills_project_dir,
         paths.chroma_dir,
     ):
         directory.mkdir(parents=True, exist_ok=True)
