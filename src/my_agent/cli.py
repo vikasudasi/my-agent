@@ -7,7 +7,12 @@ from typing import Optional
 import typer
 
 from my_agent.agent import get_runtime
-from my_agent.checkpoint import get_latest_thread_id, list_threads
+from my_agent.checkpoint import (
+    delete_thread,
+    get_latest_thread_id,
+    list_threads,
+    prune_threads,
+)
 from my_agent.config import DisplayConfig, load_config
 from my_agent.runner import get_thread_state_info, run_turn
 from my_agent.store import list_memories, read_memory
@@ -140,6 +145,118 @@ def threads_list(
         if thread.message_count:
             typer.echo(f"   messages={thread.message_count}")
         typer.echo(f"   first_user_message: {_snippet(thread.first_user_message)}")
+
+
+@threads_app.command("delete")
+def threads_delete(
+    thread_id: str = typer.Argument(..., help="Thread id to delete."),
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        help="Path to config.toml (default: ./config.toml).",
+        exists=True,
+        dir_okay=False,
+        resolve_path=True,
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompt.",
+    ),
+) -> None:
+    """Delete a saved chat thread and its checkpoint history."""
+    config_path = _resolve_config_path(config)
+    app_config = load_config(Path(config_path) if config_path else None)
+
+    if not yes:
+        typer.confirm(
+            f"Delete thread {thread_id} and all its checkpoint data?",
+            abort=True,
+        )
+
+    delete_thread(app_config, thread_id)
+    typer.echo(f"Deleted thread {thread_id}.")
+
+
+@threads_app.command("prune")
+def threads_prune(
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        help="Path to config.toml (default: ./config.toml).",
+        exists=True,
+        dir_okay=False,
+        resolve_path=True,
+    ),
+    keep: Optional[int] = typer.Option(
+        None,
+        "--keep",
+        min=0,
+        help="Keep this many newest threads (0 = no count limit). Default: config [checkpoint].max_threads.",
+    ),
+    max_age_days: Optional[int] = typer.Option(
+        None,
+        "--max-age-days",
+        min=0,
+        help="Delete threads older than N days (0 = disabled). Default: config [checkpoint].max_thread_age_days.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show threads that would be deleted without deleting.",
+    ),
+    no_protect_latest: bool = typer.Option(
+        False,
+        "--no-protect-latest",
+        help="Allow deleting the most recently updated thread.",
+    ),
+    no_vacuum: bool = typer.Option(
+        False,
+        "--no-vacuum",
+        help="Skip SQLite VACUUM after deleting threads.",
+    ),
+) -> None:
+    """Delete old chat threads by count and/or age limits."""
+    config_path = _resolve_config_path(config)
+    app_config = load_config(Path(config_path) if config_path else None)
+
+    keep_limit = app_config.checkpoint.max_threads if keep is None else keep
+    age_limit = (
+        app_config.checkpoint.max_thread_age_days
+        if max_age_days is None
+        else max_age_days
+    )
+
+    if keep_limit <= 0 and age_limit <= 0:
+        typer.echo(
+            "No retention limits configured. Set [checkpoint].max_threads or "
+            "max_thread_age_days in config.toml, or pass --keep / --max-age-days."
+        )
+        raise typer.Exit(1)
+
+    result = prune_threads(
+        app_config,
+        keep=keep,
+        max_age_days=max_age_days,
+        protect_latest=not no_protect_latest,
+        dry_run=dry_run,
+        vacuum=not no_vacuum,
+    )
+
+    if not result.deleted:
+        typer.echo("No threads to prune.")
+        raise typer.Exit(0)
+
+    action = "Would delete" if result.dry_run else "Deleted"
+    typer.echo(f"{action} {len(result.deleted)} thread(s):")
+    for thread_id in result.deleted:
+        typer.echo(f"  - {thread_id}")
+
+    if result.dry_run:
+        typer.echo("\nRe-run without --dry-run to apply.")
+    elif result.vacuumed:
+        typer.echo("Ran SQLite VACUUM on checkpoints database.")
 
 
 @memories_app.command("list")

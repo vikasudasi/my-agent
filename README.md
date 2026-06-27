@@ -56,7 +56,7 @@ Key `config.toml` sections:
 | `[llm]` | Model slug (e.g. `anthropic/claude-sonnet-4-6`) and temperature |
 | `[agent]` | Home directory root (`~`) and optional system prompt override |
 | `[security]` | `require_approval` — prompt before destructive shell/file actions |
-| `[checkpoint]` | Thread persistence (`sqlite` or `memory`) |
+| `[checkpoint]` | Thread persistence (`sqlite` or `memory`), retention limits |
 | `[store]` | `/memories/` persistence (`sqlite` or `memory`) |
 | `[memory]` | Chroma collection and embedding model |
 | `[tavily]` | Web search defaults |
@@ -70,7 +70,10 @@ Local state is stored under `~/.my-agent/` by default (checkpoints, Chroma, user
 my-agent
 ├── chat              Interactive REPL
 ├── run <task>        One-shot task
-├── threads list      List saved chat threads
+├── threads
+│   ├── list          List saved chat threads
+│   ├── prune         Delete old threads by retention limits
+│   └── delete <id>   Delete one thread
 └── memories
     ├── list          List /memories/ files
     └── read <path>   Print a /memories/ file
@@ -137,6 +140,47 @@ my-agent threads list --limit 10
 
 Use the `thread_id` from this output with `my-agent chat --thread-id <id>` to resume a conversation.
 
+### `my-agent threads prune`
+
+Delete old threads using count and/or age limits from config (or CLI overrides). The most recently updated thread is protected by default (the one `chat --continue` would use).
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--keep N` | `[checkpoint].max_threads` | Keep N newest threads (`0` = no count limit) |
+| `--max-age-days N` | `[checkpoint].max_thread_age_days` | Delete threads older than N days (`0` = disabled) |
+| `--dry-run` | off | Preview deletions without applying |
+| `--no-protect-latest` | off | Allow deleting the newest thread |
+| `--no-vacuum` | off | Skip SQLite VACUUM after prune |
+
+Config (`config.toml`):
+
+```toml
+[checkpoint]
+max_threads = 50          # 0 = unlimited
+max_thread_age_days = 0   # 0 = disabled; e.g. 90 to drop stale threads
+```
+
+```bash
+my-agent threads prune --dry-run
+my-agent threads prune
+my-agent threads prune --keep 20
+my-agent threads prune --max-age-days 90
+```
+
+### `my-agent threads delete`
+
+Delete a single thread and all its checkpoint data.
+
+| Option | Description |
+|--------|-------------|
+| `THREAD_ID` | Thread to delete (from `threads list`) |
+| `--yes` / `-y` | Skip confirmation |
+
+```bash
+my-agent threads delete 0353da51-f909-4144-b95a-52db1ea8986f
+my-agent threads delete 0353da51-f909-4144-b95a-52db1ea8986f --yes
+```
+
 ### `my-agent memories list`
 
 List files the agent has written under `/memories/` (persisted in `store.sqlite`). Shows path, updated time, size, and a content snippet.
@@ -179,6 +223,10 @@ my-agent chat --thread-id <uuid-from-list>
 # Inspect what the agent remembers about you
 my-agent memories list
 my-agent memories read /memories/user.md
+
+# Reclaim checkpoint disk space
+my-agent threads prune --dry-run
+my-agent threads prune
 ```
 
 ## Memory

@@ -21,6 +21,9 @@ chroma_dir = "~/.my-agent/chroma"
 # "sqlite" persists chat threads across restarts; "memory" is in-process only.
 backend = "sqlite"
 sqlite_path = "checkpoints.sqlite"
+# Retention for `my-agent threads prune` (0 = unlimited / disabled).
+max_threads = 50
+max_thread_age_days = 0
 
 [store]
 # "sqlite" persists /memories/ files across restarts; "memory" is in-process only.

@@ -62,6 +62,8 @@ class DisplayConfig:
 class CheckpointConfig:
     backend: str = "sqlite"
     sqlite_path: str = "checkpoints.sqlite"
+    max_threads: int = 50
+    max_thread_age_days: int = 0
 
 
 @dataclass(frozen=True)
@@ -203,6 +205,10 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
             backend=str(checkpoint_section.get("backend", "sqlite")).strip().lower(),
             sqlite_path=str(
                 checkpoint_section.get("sqlite_path", "checkpoints.sqlite")
+            ),
+            max_threads=int(checkpoint_section.get("max_threads", 50)),
+            max_thread_age_days=int(
+                checkpoint_section.get("max_thread_age_days", 0)
             ),
         ),
         store=StoreConfig(

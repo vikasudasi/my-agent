@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,6 @@ INNER JOIN (
     ON c.thread_id = latest.thread_id
     AND c.checkpoint_id = latest.checkpoint_id
 ORDER BY c.checkpoint_id DESC
-LIMIT ?
 """
 
 
@@ -34,6 +34,13 @@ class ThreadSummary:
     updated_at: str | None
     message_count: int = 0
     first_user_message: str | None = None
+
+
+@dataclass(frozen=True)
+class PruneResult:
+    deleted: tuple[str, ...]
+    dry_run: bool
+    vacuumed: bool
 
 
 def _resolve_sqlite_path(config: AppConfig) -> Path:
@@ -99,6 +106,114 @@ def list_threads(
     return [_enrich_thread_summary(agent, summary) for summary in summaries]
 
 
+def delete_thread(config: AppConfig, thread_id: str) -> None:
+    """Delete all checkpoint data for a thread."""
+    checkpointer = get_checkpointer(config)
+    checkpointer.delete_thread(thread_id)
+
+
+def prune_threads(
+    config: AppConfig,
+    *,
+    keep: int | None = None,
+    max_age_days: int | None = None,
+    protect_latest: bool = True,
+    dry_run: bool = False,
+    vacuum: bool = True,
+) -> PruneResult:
+    """Delete old threads by count and/or age limits.
+
+    A thread is removed when it exceeds the keep-newest count and/or is older
+    than ``max_age_days``. ``0`` disables each limit. Config defaults apply
+    when ``keep`` or ``max_age_days`` is ``None``.
+    """
+    keep_limit = config.checkpoint.max_threads if keep is None else keep
+    age_limit = (
+        config.checkpoint.max_thread_age_days
+        if max_age_days is None
+        else max_age_days
+    )
+
+    if keep_limit <= 0 and age_limit <= 0:
+        return PruneResult(deleted=(), dry_run=dry_run, vacuumed=False)
+
+    all_threads = list_threads(config, limit=0)
+    if not all_threads:
+        return PruneResult(deleted=(), dry_run=dry_run, vacuumed=False)
+
+    protected = {all_threads[0].thread_id} if protect_latest and all_threads else set()
+    to_delete = _select_threads_to_prune(
+        all_threads,
+        keep=keep_limit,
+        max_age_days=age_limit,
+        protected=protected,
+    )
+
+    if not dry_run:
+        checkpointer = get_checkpointer(config)
+        for thread_id in to_delete:
+            checkpointer.delete_thread(thread_id)
+        vacuumed = vacuum and bool(to_delete) and config.checkpoint.backend == "sqlite"
+        if vacuumed:
+            _vacuum_sqlite(config)
+    else:
+        vacuumed = False
+
+    return PruneResult(
+        deleted=tuple(to_delete),
+        dry_run=dry_run,
+        vacuumed=vacuumed,
+    )
+
+
+def _select_threads_to_prune(
+    threads: list[ThreadSummary],
+    *,
+    keep: int,
+    max_age_days: int,
+    protected: set[str],
+) -> list[str]:
+    """Return thread ids to delete (newest-first input list)."""
+    candidates: set[str] = set()
+
+    if keep > 0 and len(threads) > keep:
+        for summary in threads[keep:]:
+            candidates.add(summary.thread_id)
+
+    if max_age_days > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        for summary in threads:
+            updated = _parse_checkpoint_ts(summary.updated_at)
+            if updated is not None and updated < cutoff:
+                candidates.add(summary.thread_id)
+
+    return [
+        thread_id
+        for thread_id in candidates
+        if thread_id not in protected
+    ]
+
+
+def _parse_checkpoint_ts(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _vacuum_sqlite(config: AppConfig) -> None:
+    db_path = _resolve_sqlite_path(config)
+    if not db_path.is_file():
+        return
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("VACUUM")
+    finally:
+        conn.close()
+
+
 def get_latest_thread_id(config: AppConfig) -> str | None:
     """Return the most recently updated thread id, if any."""
     threads = list_threads(config, limit=1)
@@ -109,15 +224,21 @@ def _list_threads_sqlite(
     checkpointer: BaseCheckpointSaver,
     config: AppConfig,
     *,
-    limit: int,
+    limit: int = 20,
 ) -> list[ThreadSummary]:
     db_path = _resolve_sqlite_path(config)
     if not db_path.is_file():
         return []
 
+    query = _LATEST_THREADS_SQL
+    params: tuple[Any, ...] = ()
+    if limit > 0:
+        query = f"{query}\nLIMIT ?"
+        params = (limit,)
+
     conn = sqlite3.connect(str(db_path))
     try:
-        rows = conn.execute(_LATEST_THREADS_SQL, (limit,)).fetchall()
+        rows = conn.execute(query, params).fetchall()
     finally:
         conn.close()
 
@@ -136,7 +257,7 @@ def _list_threads_sqlite(
 def _list_threads_memory(
     checkpointer: BaseCheckpointSaver,
     *,
-    limit: int,
+    limit: int = 20,
 ) -> list[ThreadSummary]:
     if not isinstance(checkpointer, InMemorySaver):
         return []
@@ -156,7 +277,9 @@ def _list_threads_memory(
         )
 
     summaries.sort(key=lambda item: item.updated_at or "", reverse=True)
-    return summaries[:limit]
+    if limit > 0:
+        return summaries[:limit]
+    return summaries
 
 
 def _load_checkpoint_blob(
