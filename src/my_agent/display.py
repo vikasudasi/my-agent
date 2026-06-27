@@ -5,6 +5,7 @@ import sys
 from typing import Any, TextIO
 
 from rich.console import Console
+from rich.rule import Rule
 from rich.style import Style
 
 from my_agent.config import DisplayConfig
@@ -35,7 +36,6 @@ class TurnStreamPrinter:
         self._printed_skills: set[str] = set()
         self._pending_tools: list[Any] = []
         self._announced_tool_calls: set[str] = set()
-        self._reasoning_header_printed = False
 
     def consume_run(self, run: Any) -> None:
         """Drive a `stream_events(version='v3')` run and print live progress."""
@@ -78,17 +78,19 @@ class TurnStreamPrinter:
         self._console.print(f"[bold]Skills loaded[/bold]: {joined}", style=SKILLS_STYLE)
 
     def _handle_message_stream(self, stream: Any) -> None:
-        self._reasoning_header_printed = False
+        had_reasoning = False
         if self._config.show_reasoning:
             for token in stream.reasoning:
                 if not token:
                     continue
-                if not self._reasoning_header_printed:
-                    self._console.print("Reasoning: ", style=REASONING_STYLE, end="")
-                    self._reasoning_header_printed = True
+                if not had_reasoning:
+                    self._console.print("Thought process: ", style=REASONING_STYLE, end="")
+                    had_reasoning = True
                 self._write(token)
-            if self._reasoning_header_printed:
+            if had_reasoning:
                 self._write("\n")
+                self._console.print(Rule(style="bright_black"))
+                self._console.print()
 
         if self._config.show_tool_calls:
             for tool_call in stream.tool_calls.get():
