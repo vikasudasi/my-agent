@@ -410,16 +410,46 @@ def chat(
             break
 
         turn_index += 1
-        run_turn(
-            agent,
-            app_config,
-            chroma_store,
-            user_message=user_input,
-            thread_id=active_thread,
-            turn_index=turn_index,
-            stream=True,
-            display=display,
-        )
+        try:
+            run_turn(
+                agent,
+                app_config,
+                chroma_store,
+                user_message=user_input,
+                thread_id=active_thread,
+                turn_index=turn_index,
+                stream=True,
+                display=display,
+            )
+        except KeyboardInterrupt:
+            # Ctrl+C mid-turn: let user redirect the agent
+            _console.print()
+            _console.print("[yellow]Interrupted. Type your correction or press Enter to discard:[/yellow]")
+            try:
+                correction = _console.input("[bold yellow]Redirect:[/bold yellow] ")
+            except (EOFError, KeyboardInterrupt):
+                _console.print("\n[dim]Discarded.[/dim]")
+                _console.print()
+                _console.print(Rule(style="bright_black"))
+                _console.print()
+                continue
+            if correction.strip():
+                turn_index += 1
+                run_turn(
+                    agent,
+                    app_config,
+                    chroma_store,
+                    user_message=correction,
+                    thread_id=active_thread,
+                    turn_index=turn_index,
+                    stream=True,
+                    display=display,
+                )
+            _console.print()
+            _console.print(Rule(style="bright_black"))
+            _console.print()
+            continue
+
         _console.print()
         _console.print(Rule(style="bright_black"))
         _console.print()
