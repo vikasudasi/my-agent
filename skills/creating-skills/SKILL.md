@@ -52,6 +52,18 @@ Do **not** create a skill for one-off tasks, trivial single-command answers, or 
 - `allowed-tools`: space-separated tool names this skill expects (e.g. `tavily_search execute`)
 - `license`, `compatibility`, `metadata`
 
+**⚠️ YAML gotcha — quote descriptions with colons**
+
+If the `description` contains colons (e.g. `Triggers: "semble", "code search"`), YAML interprets `: ` as a mapping separator and silently drops the skill. Always wrap the entire `description` in double quotes if it contains colons:
+
+```yaml
+# BAD — YAML parser sees `: "semble"` as a mapping key and fails
+description: Triggers: "semble", "code search"
+
+# GOOD — quoted value
+description: "Triggers: \"semble\", \"code search\""
+```
+
 ### Template
 
 ```markdown
@@ -117,6 +129,7 @@ If the user needs a **new capability** (e.g. a new API), you must also add a too
 
 - [ ] Directory name equals `name` in frontmatter
 - [ ] `description` has trigger keywords and is third-person
+- [ ] `description` is quoted if it contains colons or special YAML characters
 - [ ] Procedure is step-by-step with examples
 - [ ] No secrets in the file
 - [ ] Existing skill wasn't duplicated unnecessarily
