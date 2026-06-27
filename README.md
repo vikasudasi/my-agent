@@ -68,8 +68,9 @@ Local state is stored under `~/.my-agent/` by default (checkpoints, Chroma, user
 
 ```
 my-agent
-├── chat              Interactive REPL
-├── run <task>        One-shot task
+├── chat                         Interactive REPL
+├── run <task>                   One-shot task
+├── help [topic]                 Command reference (this document in the terminal)
 ├── threads
 │   ├── list          List saved chat threads
 │   ├── prune         Delete old threads by retention limits
@@ -84,7 +85,23 @@ Global options are available on every command:
 | Option | Description |
 |--------|-------------|
 | `--config FILE` | Path to `config.toml` (default: `./config.toml`) |
-| `--help` | Show command help |
+| `--help` | Show Typer help for one command |
+| `my-agent help [topic]` | Full command reference (e.g. `help chat`, `help threads prune`) |
+
+### `my-agent help`
+
+Print documented command reference in the terminal. Without a topic, shows the full overview.
+
+| Argument | Description |
+|----------|-------------|
+| `TOPIC` | Optional: `chat`, `run`, `threads`, `threads list`, `threads prune`, `threads delete`, `memories`, `memories list`, `memories read` |
+
+```bash
+my-agent help
+my-agent help chat
+my-agent help threads prune
+my-agent help memories
+```
 
 ### `my-agent chat`
 

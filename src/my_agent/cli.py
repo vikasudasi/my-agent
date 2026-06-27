@@ -14,6 +14,7 @@ from my_agent.checkpoint import (
     prune_threads,
 )
 from my_agent.config import DisplayConfig, load_config
+from my_agent.help_text import render_help
 from my_agent.runner import get_thread_state_info, run_turn
 from my_agent.store import list_memories, read_memory
 
@@ -108,6 +109,18 @@ def _snippet(text: str | None, *, max_len: int = 72) -> str:
     if len(compact) <= max_len:
         return compact
     return f"{compact[: max_len - 1]}…"
+
+
+@app.command("help")
+def help_cmd(
+    topic: Optional[list[str]] = typer.Argument(
+        None,
+        help="Topic: chat, run, threads, threads list, memories, etc.",
+    ),
+) -> None:
+    """Show command reference (all documented CLI commands)."""
+    joined = " ".join(topic).strip() if topic else None
+    typer.echo(render_help(joined or None))
 
 
 @threads_app.command("list")
