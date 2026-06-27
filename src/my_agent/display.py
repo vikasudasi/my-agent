@@ -78,8 +78,6 @@ class TurnStreamPrinter:
                 self._write("\n")
 
         if self._config.show_tool_calls:
-            for chunk in stream.tool_calls:
-                self._announce_tool_call_chunk(chunk)
             for tool_call in stream.tool_calls.get():
                 self._announce_tool_call(tool_call)
 
@@ -108,17 +106,6 @@ class TurnStreamPrinter:
 
         if stream not in self._pending_tools:
             self._pending_tools.append(stream)
-
-    def _announce_tool_call_chunk(self, chunk: Any) -> None:
-        name = getattr(chunk, "name", None) or (
-            chunk.get("name") if isinstance(chunk, dict) else None
-        )
-        if not name:
-            return
-        args = getattr(chunk, "args", None) or (
-            chunk.get("args") if isinstance(chunk, dict) else None
-        )
-        self._announce_tool_call({"name": name, "args": args or {}})
 
     def _announce_tool_call(self, tool_call: dict[str, Any]) -> None:
         name = str(tool_call.get("name") or "tool")
