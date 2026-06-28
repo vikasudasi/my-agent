@@ -10,6 +10,7 @@ dependencies = [
     "langchain>=0.3.0",
     "langchain-chroma>=0.2.0",
     "langchain-huggingface>=0.1.0",
+    "langchain-mcp-adapters>=0.2.0",
     "langchain-openrouter>=0.1.0",
     "langchain-tavily>=0.2.0",
     "langgraph>=0.3.0",

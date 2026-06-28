@@ -24,6 +24,7 @@ from my_agent.middleware import SummarizationMiddleware
 from my_agent.tools.conversation_memory import build_conversation_tools
 from my_agent.tools.delegate_task import build_delegate_task_tool
 from my_agent.tools.fetch_page import fetch_page
+from my_agent.tools.mcp_tools import load_mcp_tools
 from my_agent.store import get_store
 from my_agent.tools.tavily_search import build_tavily_tools
 
@@ -138,6 +139,8 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
     )
     middleware_stack.append(summarization_mw)
 
+    mcp_tools = load_mcp_tools(config)
+
     return create_deep_agent(
         model=f"openrouter:{config.llm.model}",
         system_prompt=config.agent.system_prompt,
@@ -148,6 +151,7 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
             build_delegate_task_tool(config, chroma_store),
             *build_conversation_tools(chroma_store),
             *build_tavily_tools(config.tavily),
+            *mcp_tools,
         ],
         memory=memory_sources,
         interrupt_on=interrupt_on,

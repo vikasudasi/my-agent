@@ -63,6 +63,45 @@ class TestExpandsUserPaths:
         assert "some-dir" in result.parts
 
 
+class TestMCPConfig:
+    """MCP server config parsing and defaults."""
+
+    def test_defaults_disabled_when_no_section(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "config.toml"
+        config_file.write_text('[llm]\nmodel = "test-model"\n')
+        from my_agent.config import MCPConfig, MCPServerConfig
+
+        assert MCPConfig().enabled is True
+        assert MCPConfig().servers == ()
+
+    def test_parses_single_stdio_server(self) -> None:
+        from my_agent.config import MCPServerConfig
+
+        server = MCPServerConfig(
+            name="math",
+            transport="stdio",
+            command="python",
+            args=["/path/to/server.py"],
+        )
+        assert server.name == "math"
+        assert server.transport == "stdio"
+        assert server.command == "python"
+        assert server.args == ["/path/to/server.py"]
+
+    def test_parses_http_server_with_headers(self) -> None:
+        from my_agent.config import MCPServerConfig
+
+        server = MCPServerConfig(
+            name="weather",
+            transport="http",
+            url="http://localhost:8000/mcp",
+            headers={"Authorization": "Bearer token123"},
+        )
+        assert server.transport == "http"
+        assert server.url == "http://localhost:8000/mcp"
+        assert server.headers == {"Authorization": "Bearer token123"}
+
+
 class TestMessageText:
     """Utility for extracting text from messages."""
 

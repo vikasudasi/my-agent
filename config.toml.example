@@ -55,6 +55,42 @@ search_depth = "basic"
 include_answer = false
 include_raw_content = false
 
+[mcp]
+# Enable/disable MCP server integration (default: true)
+# enabled = true
+
+# Define MCP servers the agent can use.
+# Each server needs a unique name and transport type.
+# Servers from ~/.my-agent/config.toml and ./config.toml are merged;
+# cwd servers override home servers with the same name.
+#
+# Stdio transport (local subprocess):
+# [[mcp.servers]]
+# name = "filesystem"
+# transport = "stdio"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+#
+# HTTP transport (remote server — also accepts "streamable_http" / "streamable-http"):
+# [[mcp.servers]]
+# name = "weather"
+# transport = "http"
+# url = "http://localhost:8000/mcp"
+# headers = { Authorization = "Bearer ${MCP_WEATHER_TOKEN}" }
+#
+# SSE transport (Server-Sent Events):
+# [[mcp.servers]]
+# name = "sse-server"
+# transport = "sse"
+# url = "http://localhost:8000/mcp/sse"
+# headers = { Authorization = "Bearer ${MCP_SSE_TOKEN}" }
+#
+# WebSocket transport:
+# [[mcp.servers]]
+# name = "ws-server"
+# transport = "websocket"
+# url = "ws://localhost:8000/mcp"
+
 [display]
 show_reasoning = true
 show_tool_calls = true

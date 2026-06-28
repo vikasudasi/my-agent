@@ -85,6 +85,22 @@ class StoreConfig:
 
 
 @dataclass(frozen=True)
+class MCPServerConfig:
+    name: str
+    transport: str = "stdio"
+    command: str | None = None
+    args: list[str] | None = None
+    url: str | None = None
+    headers: dict[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class MCPConfig:
+    enabled: bool = True
+    servers: tuple[MCPServerConfig, ...] = ()
+
+
+@dataclass(frozen=True)
 class AppConfig:
     llm: LLMConfig
     agent: AgentConfig
@@ -96,6 +112,7 @@ class AppConfig:
     display: DisplayConfig
     checkpoint: CheckpointConfig
     store: StoreConfig
+    mcp: MCPConfig
     project_root: Path  # cwd at agent startup
     cwd: Path  # current working directory (same as project_root for now, separate for clarity)
     home_agent_dir: Path  # ~/.my-agent resolved
@@ -200,6 +217,7 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
     display_section = raw.get("display", {})
     checkpoint_section = raw.get("checkpoint", {})
     store_section = raw.get("store", {})
+    mcp_section = raw.get("mcp", {})
 
     model = llm_section.get("model", "").strip()
     if not model:
@@ -263,7 +281,40 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
     has_cwd_skills = (project_root / "skills").is_dir()
 
     # ------------------------------------------------------------------
-    # 6. Build AppConfig
+    # 6. MCP servers: merge from home config + cwd config
+    # ------------------------------------------------------------------
+    mcp_enabled = bool(mcp_section.get("enabled", True))
+    merged_servers: dict[str, MCPServerConfig] = {}
+    for cfg_path in (home_agent / "config.toml", project_root / "config.toml"):
+        if cfg_path.is_file() and cfg_path != config_file:
+            with cfg_path.open("rb") as handle:
+                other_raw = tomllib.load(handle)
+            other_mcp = other_raw.get("mcp", {})
+            for s in other_mcp.get("servers", ()):
+                merged_servers[s["name"]] = MCPServerConfig(
+                    name=s["name"],
+                    transport=str(s.get("transport", "stdio")),
+                    command=s.get("command"),
+                    args=s.get("args"),
+                    url=s.get("url"),
+                    headers=s.get("headers"),
+                )
+    # Also add servers from the primary config file (these win on name conflict)
+    for s in mcp_section.get("servers", ()):
+        name = s["name"]
+        merged_servers[name] = MCPServerConfig(
+            name=name,
+            transport=str(s.get("transport", "stdio")),
+            command=s.get("command"),
+            args=s.get("args"),
+            url=s.get("url"),
+            headers=s.get("headers"),
+        )
+
+    mcp = MCPConfig(enabled=mcp_enabled, servers=tuple(merged_servers.values()))
+
+    # ------------------------------------------------------------------
+    # 7. Build AppConfig
     # ------------------------------------------------------------------
     return AppConfig(
         llm=LLMConfig(
@@ -320,6 +371,7 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
             backend=str(store_section.get("backend", "sqlite")).strip().lower(),
             sqlite_path=str(store_section.get("sqlite_path", "store.sqlite")),
         ),
+        mcp=mcp,
         project_root=project_root,
         cwd=project_root,
         home_agent_dir=home_agent,
