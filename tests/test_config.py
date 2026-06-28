@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from my_agent.config import _build_system_prompt, load_config
+
+
+class TestBuildSystemPrompt:
+    """_build_system_prompt combines home and cwd AGENTS.md content."""
+
+    def test_configured_prompt_takes_precedence(self) -> None:
+        result = _build_system_prompt(
+            "Explicit system prompt.",
+            "home content",
+            "cwd content",
+        )
+        assert result == "Explicit system prompt."
+
+    def test_combines_home_and_cwd(self) -> None:
+        result = _build_system_prompt("", "home rules", "cwd rules")
+        assert "home rules" in result
+        assert "cwd rules" in result
+
+    def test_fallback_when_no_content(self) -> None:
+        result = _build_system_prompt("", None, None)
+        assert result == "You are a helpful personal macOS assistant."
+
+    def test_deduplicates_identical_content(self) -> None:
+        result = _build_system_prompt("", "same content", "same content")
+        assert result.count("same content") == 1
+
+
+class TestLoadConfig:
+    """load_config resolves configuration from disk."""
+
+    def test_raises_when_nonexistent_config_path(self, tmp_path: Path) -> None:
+        nonexistent = tmp_path / "nonexistent.toml"
+        with pytest.raises(FileNotFoundError, match="No such file or directory"):
+            load_config(config_path=nonexistent)
+
+    def test_raises_without_api_key(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "config.toml"
+        config_file.write_text('[llm]\nmodel = "test-model"\n')
+
+        # Real ~/.my-agent/.env may set OPENROUTER_API_KEY; isolate the test
+        with patch("my_agent.config.load_dotenv", return_value=None):
+            with patch.dict("os.environ", {}, clear=True):
+                with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
+                    load_config(config_path=config_file)
+
+
+class TestExpandsUserPaths:
+    """Path expansion in load_config handles ~ and relative paths."""
+
+    def test_expand_home(self, tmp_path: Path) -> None:
+        from my_agent.config import _expand_path
+
+        result = _expand_path("~/some-dir", tmp_path)
+        assert result.is_absolute()
+        assert "some-dir" in result.parts
+
+
+class TestMessageText:
+    """Utility for extracting text from messages."""
+
+    def test_extracts_plain_string(self) -> None:
+        from my_agent.runner import _message_text
+
+        class FakeMessage:
+            content = "Hello world"
+
+        assert _message_text(FakeMessage()) == "Hello world"
+
+    def test_extracts_text_blocks(self) -> None:
+        from my_agent.runner import _message_text
+
+        class FakeMessage:
+            content = [{"type": "text", "text": "Hello"}, {"type": "text", "text": "world"}]
+
+        assert _message_text(FakeMessage()) == "Hello\nworld"
+
+    def test_handles_empty_content(self) -> None:
+        from my_agent.runner import _message_text
+
+        class FakeMessage:
+            content = ""
+
+        assert _message_text(FakeMessage()) == ""
+
+    def test_handles_unknown_type(self) -> None:
+        from my_agent.runner import _message_text
+
+        class FakeMessage:
+            content = 42
+
+        assert _message_text(FakeMessage()) == "42"
