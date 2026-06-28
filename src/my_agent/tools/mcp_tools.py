@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any
 
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import StructuredTool, ToolException
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from my_agent.config import AppConfig
@@ -43,9 +43,28 @@ def _add_sync_support(tools: list[Any]) -> list[Any]:
         coro = tool.coroutine
 
         def _sync_call(*args: Any, **kwargs: Any) -> Any:
-            return asyncio.run(coro(*args, **kwargs))
+            try:
+                return asyncio.run(coro(*args, **kwargs))
+            except ToolException as e:
+                logger.error(
+                    "MCP tool '%s' failed: %s", tool.name, e
+                )
+                # Return tuple matching response_format='content_and_artifact'
+                return (
+                    f"MCP tool '{tool.name}' failed: {e}",
+                    None,
+                )
+            except Exception as e:
+                logger.error(
+                    "MCP tool '%s' raised unexpected error: %s", tool.name, e
+                )
+                return (
+                    f"Unexpected error in MCP tool '{tool.name}': {e}",
+                    None,
+                )
 
         tool.func = _sync_call
+        tool.handle_tool_error = True
         logger.debug("Added sync wrapper to MCP tool '%s'", tool.name)
 
     return tools
