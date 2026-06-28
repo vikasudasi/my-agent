@@ -1,6 +1,6 @@
 # my-agent
 
-A local macOS personal assistant built on [LangChain Deep Agents](https://github.com/langchain-ai/deepagents). It runs shell commands, reads and writes files, searches the web, and remembers conversations across sessions.
+A local macOS deep agent built on [LangChain Deep Agents](https://github.com/langchain-ai/deepagents) and [OpenRouter](https://openrouter.ai/). It runs shell commands, reads and writes files, searches the web, remembers conversations across sessions, and integrates with MCP (Model Context Protocol) servers for pluggable tools and capabilities.
 
 ## Features
 
@@ -9,6 +9,8 @@ A local macOS personal assistant built on [LangChain Deep Agents](https://github
 - **Persistent threads** — chat history survives restarts via SQLite checkpoints
 - **Semantic memory** — ChromaDB indexes conversations for cross-thread search
 - **Agent skills** — markdown workflows the agent loads on demand (`skills/`)
+- **MCP server integration** — connect local and remote MCP servers for tools and resources (stdio, SSE, Streamable HTTP, WebSocket)
+- **Subagent delegation** — spawn isolated subagents for complex tasks with live streaming
 - **Web search** — Tavily integration for live information (optional)
 - **Human-in-the-loop** — optional approval before shell commands and file writes
 - **Verbose mode** — show reasoning, tool calls, tool results, and loaded skills
@@ -100,8 +102,91 @@ Key `config.toml` sections:
 | `[memory]` | Chroma collection and embedding model |
 | `[tavily]` | Web search defaults |
 | `[display]` | Streaming verbosity defaults |
+| `[mcp]` | MCP server integration (see [MCP Configuration](#mcp-configuration)) |
 
 Persistent data lives under `~/.my-agent/` by default (checkpoints, Chroma, memories store, user skills), making it safe to run from any directory.
+
+## MCP Configuration
+
+my-agent supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) for connecting to external tools and resources. Configure MCP servers in `config.toml` under the `[mcp]` section.
+
+### Quick Start
+
+```toml
+# Enable/disable MCP integration (default: true)
+[mcp]
+
+# ---- Stdio (local subprocess) ----
+# Run a local MCP server via command-line
+[[mcp.servers]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+
+# ---- HTTP / Streamable HTTP (remote) ----
+# Connect to a remote MCP server using the Streamable HTTP transport
+[[mcp.servers]]
+name = "weather"
+transport = "http"
+url = "http://localhost:8000/mcp"
+headers = { Authorization = "Bearer ${MCP_WEATHER_TOKEN}" }
+
+# ---- SSE (remote, Server-Sent Events) ----
+[[mcp.servers]]
+name = "sse-server"
+transport = "sse"
+url = "http://localhost:8000/mcp/sse"
+headers = { Authorization = "Bearer ${MCP_SSE_TOKEN}" }
+
+# ---- WebSocket (remote) ----
+[[mcp.servers]]
+name = "ws-server"
+transport = "websocket"
+url = "ws://localhost:8000/mcp"
+```
+
+### Transport Reference
+
+| Transport | `transport` value | Use case |
+|-----------|-------------------|----------|
+| **Stdio** | `"stdio"` | Local subprocess (e.g. `npx`-based MCP servers) |
+| **Streamable HTTP** | `"http"`, `"streamable_http"`, or `"streamable-http"` | Remote server using the newer Streamable HTTP MCP transport |
+| **SSE** | `"sse"` | Remote server using the classic Server-Sent Events MCP transport |
+| **WebSocket** | `"websocket"` | Remote server using WebSocket transport |
+
+### Per-Server Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Unique identifier for the server |
+| `transport` | string | yes | One of `stdio`, `sse`, `http`, `streamable_http`, `websocket` |
+| `command` | string | required for `stdio` | The executable to run |
+| `args` | string[] | optional | Command-line arguments |
+| `url` | string | required for `sse`, `http`, `websocket` | Server URL |
+| `headers` | table | optional | HTTP headers (supports `${ENV_VAR}` interpolation) |
+
+> **Environment variable interpolation**: Values in `headers` can reference environment variables with the `${VAR_NAME}` syntax (e.g. `Bearer ${MCP_WEATHER_TOKEN}`). These are resolved at runtime.
+
+### Configuration Merging
+
+MCP servers from `~/.my-agent/config.toml` and `./config.toml` are **merged**. If a server with the same `name` exists in both, the project-level (`./config.toml`) definition overrides the home-level one.
+
+### Error Handling
+
+If an MCP server fails to connect or load its tools, my-agent logs a warning and continues without it. The agent will still work with whatever tools could be loaded from other servers.
+
+### MCP Architecture
+
+MCP servers are loaded at agent startup via `MultiServerMCPClient` from `langchain-mcp-adapters`. The flow:
+
+1. Config is read from `config.toml` (home + project merged)
+2. Each server definition is validated and converted to a connection dict
+3. `MultiServerMCPClient` connects to all servers and collects their tools
+4. The combined tool list is injected into the agent's toolset
+5. Failed servers are skipped with a warning — the agent continues working
+
+This happens transparently — the agent can call MCP tools alongside built-in tools without any distinction.
 
 ## CLI reference
 
@@ -341,19 +426,24 @@ The `/cwd/` route is especially useful when running from a project directory —
 ```
 my-agent/
 ├── AGENTS.md              # Agent instructions (injected into system prompt)
-├── config.toml.example    # Configuration template
+├── config.toml.example    # Configuration template (includes MCP examples)
 ├── skills/                # Project-scoped agent skills
 ├── src/my_agent/
-│   ├── agent.py           # Deep agent setup
+│   ├── agent.py           # Deep agent setup, MCP tool injection
 │   ├── checkpoint.py      # Thread persistence
 │   ├── store.py           # /memories/ persistence
 │   ├── cli.py             # Typer CLI
-│   ├── config.py          # Config loading
+│   ├── config.py          # Config loading (MCPServerConfig, MCPConfig)
 │   ├── display.py         # Streaming output
 │   ├── runner.py          # Turn execution
 │   ├── help_text.py       # CLI help text
 │   ├── memory/            # Chroma conversation store
-│   └── tools/             # fetch_page, Tavily, conversation memory
+│   └── tools/
+│       ├── mcp_tools.py   # MCP server tool loading via MultiServerMCPClient
+│       ├── fetch_page.py  # Web fetch tool
+│       ├── delegate_task.py # Subagent delegation
+│       ├── tavily_search.py # Web search tool
+│       └── conversation_memory.py # Past conversation search
 └── pyproject.toml
 ```
 
