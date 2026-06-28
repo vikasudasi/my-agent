@@ -114,11 +114,25 @@ class AppConfig:
     store: StoreConfig
     mcp: MCPConfig
     project_root: Path  # cwd at agent startup
-    cwd: Path  # current working directory (same as project_root for now, separate for clarity)
     home_agent_dir: Path  # ~/.my-agent resolved
     agents_md_paths: tuple[Path, ...]  # all existing AGENTS.md paths (home first, then cwd)
     config_dir: Path  # directory of the loaded config.toml
     has_cwd_skills: bool  # whether ./skills exists
+
+    def build_path_mappings(self) -> str:
+        """Generate the host path mappings section for the system prompt.
+
+        These tell the agent how to convert virtual filesystem paths back
+        to real filesystem paths when running shell commands.
+        """
+        return f"""Host path mappings:
+- `/cwd/` -> `{self.project_root}/`
+- `/skills/` -> `{self.paths.skills_user_dir}/`
+{f'- `/skills/project/` -> `{self.paths.skills_project_dir}/`' if self.has_cwd_skills else ''}
+- default (execute cwd) -> `{self.project_root}/`
+
+When you need to run shell commands on files, use the real paths above.
+For file tools (read_file, write_file, edit_file, ls, glob, grep), use virtual paths (/cwd/...)."""
 
 
 def _expand_path(value: str, base: Path) -> Path:
@@ -373,7 +387,6 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
         ),
         mcp=mcp,
         project_root=project_root,
-        cwd=project_root,
         home_agent_dir=home_agent,
         agents_md_paths=agents_md_paths,
         config_dir=config_dir,

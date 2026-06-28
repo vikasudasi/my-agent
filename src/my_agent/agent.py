@@ -80,13 +80,32 @@ def create_delegate_agent(config_path: str | None = None):
 
 
 def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
-    home = str(config.agent.root_dir)
+    home = str(config.project_root)
     shell_env = os.environ.copy()
     for path_entry in ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"):
         if path_entry not in shell_env.get("PATH", ""):
             shell_env["PATH"] = f"{path_entry}:{shell_env.get('PATH', '')}"
 
     store = get_store(config)
+
+    routes: dict[str, Any] = {
+        "/.agent/": StateBackend(),
+        "/memories/": StoreBackend(namespace=lambda _rt: ("memories",)),
+        "/cwd/": FilesystemBackend(
+            root_dir=str(config.project_root),
+            virtual_mode=True,
+        ),
+        "/skills/": FilesystemBackend(
+            root_dir=str(config.paths.skills_user_dir),
+            virtual_mode=True,
+        ),
+    }
+    if config.has_cwd_skills:
+        routes["/skills/project/"] = FilesystemBackend(
+            root_dir=str(config.paths.skills_project_dir),
+            virtual_mode=True,
+        )
+
     backend = CompositeBackend(
         default=LocalShellBackend(
             root_dir=home,
@@ -94,22 +113,7 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
             env=shell_env,
             inherit_env=False,
         ),
-        routes={
-            "/.agent/": StateBackend(),
-            "/memories/": StoreBackend(namespace=lambda _rt: ("memories",)),
-            "/cwd/": FilesystemBackend(
-                root_dir=str(config.project_root),
-                virtual_mode=True,
-            ),
-            "/skills/": FilesystemBackend(
-                root_dir=str(config.paths.skills_user_dir),
-                virtual_mode=True,
-            ),
-            "/skills/project/": FilesystemBackend(
-                root_dir=str(config.paths.skills_project_dir),
-                virtual_mode=True,
-            ),
-        },
+        routes=routes,
     )
 
     interrupt_on = None
@@ -141,9 +145,15 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
 
     mcp_tools = load_mcp_tools(config)
 
+    system_prompt = (
+        config.agent.system_prompt
+        + "\n\n"
+        + config.build_path_mappings()
+    )
+
     return create_deep_agent(
         model=f"openrouter:{config.llm.model}",
-        system_prompt=config.agent.system_prompt,
+        system_prompt=system_prompt,
         backend=backend,
         middleware=middleware_stack,
         tools=[
