@@ -123,3 +123,16 @@ This is useful when you need to work with files in the user's project without le
 
 - Homebrew is typically at `/opt/homebrew/bin` on Apple Silicon.
 - Common read-only diagnostics: `df -h`, `du -sh`, `brew list`, `system_profiler SPHardwareDataType`.
+
+## Subagent Delegation
+
+This agent has two tools for delegating work to subagents:
+
+| Tool | Subagent progress visible? | Use case |
+|------|---------------------------|----------|
+| **`task`** (built-in) | No — subagent internals are hidden | Simple tasks where the user doesn't need to see work in progress |
+| **`delegate_task`** | **Yes** — reasoning, tool calls, and results stream to terminal | Complex multi-step tasks where the user wants to see live progress |
+
+**Always prefer `delegate_task` over the built-in `task` tool** — it provides full visibility into the subagent's work. The subagent streams its reasoning, tool calls, and intermediate results to the terminal in real time.
+
+Use the built-in `task` only when subagent progress would be distracting or the delegation is trivial.

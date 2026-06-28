@@ -22,6 +22,7 @@ from my_agent.config import AppConfig, load_config
 from my_agent.memory.chroma_store import ChromaConversationStore
 from my_agent.middleware import SummarizationMiddleware
 from my_agent.tools.conversation_memory import build_conversation_tools
+from my_agent.tools.delegate_task import build_delegate_task_tool
 from my_agent.tools.fetch_page import fetch_page
 from my_agent.store import get_store
 from my_agent.tools.tavily_search import build_tavily_tools
@@ -65,6 +66,16 @@ def get_agent(config_path: str | None = None):
 
 def get_runtime(config_path: str | None = None):
     return _build_agent_bundle(config_path)
+
+
+def create_delegate_agent(config_path: str | None = None):
+    """Create a fresh agent for subagent delegation (no caching).
+
+    Each call returns a new agent instance for isolated subagent execution.
+    """
+    config = load_config(config_path=Path(config_path) if config_path else None)
+    chroma_store = ChromaConversationStore(config)
+    return _create_agent(config, chroma_store), config, chroma_store
 
 
 def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
@@ -134,6 +145,7 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
         middleware=middleware_stack,
         tools=[
             fetch_page,
+            build_delegate_task_tool(config, chroma_store),
             *build_conversation_tools(chroma_store),
             *build_tavily_tools(config.tavily),
         ],
