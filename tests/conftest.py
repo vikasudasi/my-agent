@@ -16,6 +16,7 @@ from my_agent.config import (
     PathsConfig,
     SecurityConfig,
     StoreConfig,
+    SummarizationConfig,
     TavilyConfig,
 )
 
@@ -55,6 +56,13 @@ def mock_config(tmp_project_root: Path) -> AppConfig:
             collection_name="test_conversations",
             embedding_model="test-embedding",
             index_on_each_turn=False,
+        ),
+        summarization=SummarizationConfig(
+            enabled=False,
+            max_messages=30,
+            keep_last=10,
+            model="",
+            temperature=0.0,
         ),
         tavily=TavilyConfig(),
         display=DisplayConfig(),

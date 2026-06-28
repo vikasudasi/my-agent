@@ -61,3 +61,16 @@ show_tool_calls = true
 show_tool_results = true
 show_skills = true
 tool_result_max_chars = 500
+
+[summarization]
+# When enabled, older conversation turns are automatically summarized to
+# keep the context window small. Triggered when non-system messages exceed
+# max_messages — older messages are replaced with a single summary.
+# Set enabled = false to disable.
+enabled = true
+max_messages = 30
+keep_last = 10
+# Optional: use a different (cheaper) model for summarization.
+# Leave empty to use the [llm].model.
+model = ""
+temperature = 0.0

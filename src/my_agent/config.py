@@ -62,6 +62,15 @@ class DisplayConfig:
 
 
 @dataclass(frozen=True)
+class SummarizationConfig:
+    enabled: bool = True
+    max_messages: int = 30
+    keep_last: int = 10
+    model: str = ""
+    temperature: float = 0.0
+
+
+@dataclass(frozen=True)
 class CheckpointConfig:
     backend: str = "sqlite"
     sqlite_path: str = "checkpoints.sqlite"
@@ -82,6 +91,7 @@ class AppConfig:
     security: SecurityConfig
     paths: PathsConfig
     memory: MemoryConfig
+    summarization: SummarizationConfig
     tavily: TavilyConfig
     display: DisplayConfig
     checkpoint: CheckpointConfig
@@ -185,6 +195,7 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
     security_section = raw.get("security", {})
     paths_section = raw.get("paths", {})
     memory_section = raw.get("memory", {})
+    summarization_section = raw.get("summarization", {})
     tavily_section = raw.get("tavily", {})
     display_section = raw.get("display", {})
     checkpoint_section = raw.get("checkpoint", {})
@@ -273,6 +284,13 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
                 "embedding_model", "sentence-transformers/all-MiniLM-L6-v2"
             ),
             index_on_each_turn=bool(memory_section.get("index_on_each_turn", True)),
+        ),
+        summarization=SummarizationConfig(
+            enabled=bool(summarization_section.get("enabled", True)),
+            max_messages=int(summarization_section.get("max_messages", 30)),
+            keep_last=int(summarization_section.get("keep_last", 10)),
+            model=str(summarization_section.get("model", "")),
+            temperature=float(summarization_section.get("temperature", 0.0)),
         ),
         tavily=TavilyConfig(
             max_results=int(tavily_section.get("max_results", 5)),

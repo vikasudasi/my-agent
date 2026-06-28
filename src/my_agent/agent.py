@@ -20,6 +20,7 @@ from langchain_core.runnables import RunnableConfig
 from my_agent.checkpoint import get_checkpointer
 from my_agent.config import AppConfig, load_config
 from my_agent.memory.chroma_store import ChromaConversationStore
+from my_agent.middleware import SummarizationMiddleware
 from my_agent.tools.conversation_memory import build_conversation_tools
 from my_agent.tools.fetch_page import fetch_page
 from my_agent.store import get_store
@@ -110,8 +111,8 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
     # Memory sources: all existing AGENTS.md files are injected
     memory_sources = [str(p) for p in config.agents_md_paths] or None
 
-    # Build skills middleware stack: refresh clears cached metadata, then SkillsMiddleware re-scans
-    skills_middleware = [
+    # Build skills + summarization middleware stack
+    middleware_stack: list[AgentMiddleware] = [
         _RefreshSkillsMiddleware(),
         SkillsMiddleware(
             backend=backend,
@@ -119,11 +120,18 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
         ),
     ]
 
+    summarization_mw = SummarizationMiddleware(
+        config.summarization,
+        config.llm.model,
+        api_key=os.environ.get("OPENROUTER_API_KEY"),
+    )
+    middleware_stack.append(summarization_mw)
+
     return create_deep_agent(
         model=f"openrouter:{config.llm.model}",
         system_prompt=config.agent.system_prompt,
         backend=backend,
-        middleware=skills_middleware,
+        middleware=middleware_stack,
         tools=[
             fetch_page,
             *build_conversation_tools(chroma_store),
