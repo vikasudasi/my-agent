@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pytest
 
@@ -197,6 +197,7 @@ class TestTransportTranslation:
             "srv": {
                 "transport": "streamable_http",
                 "url": "http://localhost:8000/mcp",
+                "httpx_client_factory": ANY,
                 "headers": {"Authorization": "Bearer tok"},
             }
         })
