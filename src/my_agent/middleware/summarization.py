@@ -57,6 +57,10 @@ class SummarizationMiddleware(AgentMiddleware):
                 api_key=api_key,
             )
 
+    @property
+    def name(self) -> str:
+        return "MyAgentSummarizationMiddleware"
+
     def after_agent(
         self,
         state: dict[str, Any],
