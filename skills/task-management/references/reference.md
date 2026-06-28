@@ -13,7 +13,7 @@
 pip install mcp fastapi uvicorn jinja2 anyio
 ```
 
-### Running the MCP Server
+### Running the MCP Server (stdio)
 
 The MCP server communicates over **stdio** — it's designed to be launched as a subprocess by the MCP client.
 
@@ -21,6 +21,73 @@ The MCP server communicates over **stdio** — it's designed to be launched as a
 cd path/to/server
 python mcp_server.py
 ```
+
+### Running the MCP Server (HTTP/SSE)
+
+For remote agents or MCP clients that support SSE transport (instead of spawning a subprocess):
+
+```bash
+cd path/to/server
+python mcp_server.py --http --port 8000
+```
+
+Three endpoints are exposed:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /sse` | Client connects here to receive server-sent events |
+| `POST /messages?session_id=...` | Client posts JSON-RPC messages |
+| `POST /mcp` | **Streamable HTTP** — stateless, JSON-only (no persistent connection) |
+
+### Streamable HTTP
+
+The `POST /mcp` endpoint implements **Streamable HTTP** (stateless, JSON-only mode).
+
+Unlike SSE transport (which requires a long-lived connection and two endpoints), Streamable HTTP lets standard HTTP clients make MCP requests with plain POST/Response cycles:
+
+```bash
+# Example: list projects via curl
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "project_list",
+      "arguments": {}
+    }
+  }'
+```
+
+Each request is self-contained — the initialize/initialized handshake happens automatically within the same request cycle. No persistent SSE connection or session ID management is required.
+
+**Use Streamable HTTP when:**
+- Your client can't maintain a long-lived SSE connection
+- You want to use standard HTTP tooling (curl, requests, httpx)
+- You need simpler deployment in serverless/container environments
+
+**Use SSE transport when:**
+- Your MCP client (Cursor, Claude Desktop) has native SSE support
+- You need streaming notifications from server to client
+- You want persistent session state across requests
+
+### Running with Docker
+
+Build and run the all-in-one container (MCP HTTP/SSE server + SQLite):
+
+```bash
+# Build
+docker build -t task-manager .
+
+# Run with persistent volume
+docker run -d -p 8000:8000 -v tm-data:/data --name tm task-manager
+
+# Agents connect at http://<host>:8000/sse
+```
+
+See the repo root `Dockerfile` and `README.md` for full details.
 
 ### Running the Dashboard (Optional)
 
@@ -37,6 +104,7 @@ Then open http://localhost:8000 in a browser.
 
 To use this MCP server in Cursor, add to your `.cursor/mcp.json`:
 
+**stdio mode (local):**
 ```json
 {
   "mcpServers": {
@@ -48,14 +116,53 @@ To use this MCP server in Cursor, add to your `.cursor/mcp.json`:
 }
 ```
 
+**SSE mode (remote):**
+```json
+{
+  "mcpServers": {
+    "task-manager": {
+      "type": "sse",
+      "url": "http://your-server:8000/sse"
+    }
+  }
+}
+```
+
+**Streamable HTTP mode (remote):**
+```json
+{
+  "mcpServers": {
+    "task-manager": {
+      "type": "sse",
+      "url": "http://your-server:8000/mcp"
+    }
+  }
+}
+```
+
+Note: Some MCP clients do not distinguish between SSE and Streamable HTTP in their config — both use `"type": "sse"` with different URL paths. For explicit Streamable HTTP support, check your client's documentation. Some clients accept `"type": "streamable-http"` or `"transport": "streamable-http"`.
+
 ### Configuring in Claude Desktop
 
+**stdio mode (local):**
 ```json
 {
   "mcpServers": {
     "task-manager": {
       "command": "python",
       "args": ["path/to/server/mcp_server.py"]
+    }
+  }
+}
+```
+
+**SSE mode (remote):**
+```json
+{
+  "mcpServers": {
+    "task-manager": {
+      "type": "sse",
+      "url": "http://your-server:8000/sse"
     }
   }
 }
