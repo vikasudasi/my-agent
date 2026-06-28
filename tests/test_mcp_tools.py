@@ -1,10 +1,100 @@
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 
-from my_agent.tools.mcp_tools import load_mcp_tools
+from langchain_core.tools import StructuredTool
+
+from my_agent.tools.mcp_tools import _add_sync_support, load_mcp_tools
+
+
+class TestAddSyncSupport:
+    """_add_sync_support wraps async-only StructuredTools with a sync func."""
+
+    def test_skips_non_structured_tool(self) -> None:
+        """Non-StructuredTool objects pass through unchanged."""
+        tools = ["not-a-tool", 42]
+        result = _add_sync_support(tools)
+        assert result is tools
+        assert result == ["not-a-tool", 42]
+
+    def test_skips_when_func_already_set(self) -> None:
+        """Tools that already have a sync func are not modified."""
+        def existing_func(*args: Any, **kwargs: Any) -> str:
+            return "ok"
+
+        async def _coro() -> str:
+            return "async-ok"
+
+        tool = StructuredTool(
+            name="already-sync",
+            description="test",
+            args_schema={"type": "object", "properties": {}},
+            func=existing_func,
+            coroutine=_coro,
+            response_format="content_and_artifact",
+        )
+        _add_sync_support([tool])
+        assert tool.func is existing_func  # unchanged
+
+    def test_skips_when_no_coroutine(self) -> None:
+        """Tools without a coroutine are left as-is."""
+        tool = StructuredTool(
+            name="no-coro",
+            description="test",
+            args_schema={"type": "object", "properties": {}},
+            response_format="content_and_artifact",
+        )
+        _add_sync_support([tool])
+        assert tool.func is None
+
+    def test_adds_sync_wrapper(self) -> None:
+        """Tools with only a coroutine get a sync func added."""
+        async def _fake_coro(a: int, b: int) -> str:
+            return f"result: {a + b}"
+
+        tool = StructuredTool(
+            name="async-only",
+            description="test",
+            args_schema={
+                "type": "object",
+                "properties": {
+                    "a": {"type": "integer"},
+                    "b": {"type": "integer"},
+                },
+            },
+            coroutine=_fake_coro,
+            response_format="content_and_artifact",
+        )
+        assert tool.func is None
+
+        _add_sync_support([tool])
+        assert tool.func is not None
+        result = tool.func(a=3, b=4)
+        assert result == "result: 7"
+
+    def test_sync_invoke_works_on_async_only_tool(self) -> None:
+        """The sync wrapper lets .invoke() work on async-only tools."""
+        async def _fake_coro(x: str) -> str:
+            return f"hello {x}"
+
+        tool = StructuredTool(
+            name="greet",
+            description="greeting tool",
+            args_schema={
+                "type": "object",
+                "properties": {"x": {"type": "string"}},
+            },
+            coroutine=_fake_coro,
+            response_format="content",
+        )
+        _add_sync_support([tool])
+
+        # .invoke() should not raise NotImplementedError
+        result = tool.invoke({"x": "world"})
+        assert result == "hello world"
 
 
 class TestLoadMCPTools:

@@ -1,13 +1,54 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
+from langchain_core.tools import StructuredTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from my_agent.config import AppConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _add_sync_support(tools: list[Any]) -> list[Any]:
+    """Add sync invocation support to MCP tools that are async-only.
+
+    ``langchain-mcp-adapters`` creates ``StructuredTool`` instances with only
+    a ``coroutine`` (async function) and no ``func`` (sync function). When
+    the agent calls these tools synchronously (via ``.invoke()``),
+    ``StructuredTool._run()`` raises:
+
+        NotImplementedError: StructuredTool does not support sync invocation.
+
+    This function wraps each such tool's coroutine with ``asyncio.run()`` so
+    it can be called synchronously.
+
+    Args:
+        tools: List of LangChain tool objects returned by ``load_mcp_tools``.
+
+    Returns:
+        The same list with sync ``func`` added to any ``StructuredTool``
+        that had only a ``coroutine``.
+    """
+    for tool in tools:
+        if not isinstance(tool, StructuredTool):
+            continue
+        if tool.func is not None:
+            continue  # already has sync support
+        if tool.coroutine is None:
+            continue  # nothing to wrap
+
+        coro = tool.coroutine
+
+        def _sync_call(*args: Any, **kwargs: Any) -> Any:
+            return asyncio.run(coro(*args, **kwargs))
+
+        tool.func = _sync_call
+        logger.debug("Added sync wrapper to MCP tool '%s'", tool.name)
+
+    return tools
 
 
 def load_mcp_tools(config: AppConfig) -> list[Any]:
@@ -70,10 +111,8 @@ def load_mcp_tools(config: AppConfig) -> list[Any]:
 
     client = MultiServerMCPClient(connections)
     try:
-        # Using asyncio.run() since the agent creation chain is synchronous
-        import asyncio
-
         tools = asyncio.run(client.get_tools())
+        tools = _add_sync_support(tools)
         logger.info(
             "Loaded %d MCP tool(s) from %d server(s)",
             len(tools),
