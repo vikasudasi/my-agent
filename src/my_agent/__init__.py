@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import warnings
+import os
 
-# HuggingFace tokenizers uses Rust's Rayon for parallelism. When the process
-# forks (e.g. via multiprocessing) after a tokenizer has already been loaded,
-# the child inherits locks in an inconsistent state. HF disables parallelism
-# in the child to avoid deadlocks and emits a warning about it. This warning
-# is informational-only — tokenization still works (single-threaded in child
-# processes). Suppress it to avoid noise in the terminal.
-warnings.filterwarnings(
-    "ignore",
-    message=".*The current process just got forked, after parallelism has already been used.*",
-)
+# Setting this before any tokenizers import prevents HuggingFace tokenizers
+# from enabling Rust/Rayon parallelism in the first place. When the process
+# later forks (e.g. via ChromaDB's multiprocessing), there's no parallelism-in-
+# progress to conflict with, so no warning is ever emitted. This is the standard
+# fix used by transformers, haystack, and other HF-ecosystem projects.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 __version__ = "0.1.0"
