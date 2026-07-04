@@ -8,6 +8,40 @@ import pytest
 from my_agent.config import _build_system_prompt, load_config
 
 
+class TestBuildBackendAwareness:
+    """build_backend_awareness injects routing rules into the system prompt."""
+
+    def test_includes_host_path_mappings(self, mock_config: AppConfig) -> None:
+        result = mock_config.build_backend_awareness()
+        assert "## Backend & filesystem self-awareness" in result
+        assert f"`{mock_config.project_root}/`" in result
+        assert f"`{mock_config.paths.skills_user_dir}/`" in result
+        assert f"`{mock_config.paths.skills_project_dir}/`" in result
+
+    def test_includes_golden_rules_and_tools(self, mock_config: AppConfig) -> None:
+        result = mock_config.build_backend_awareness()
+        assert "### Golden rules" in result
+        assert "`execute`" in result
+        assert "`read_file`" in result
+        assert "Destructive file/shell actions" in result
+
+    def test_omits_project_skills_when_unavailable(
+        self, mock_config: AppConfig
+    ) -> None:
+        from dataclasses import replace
+
+        config = replace(mock_config, has_cwd_skills=False)
+        result = config.build_backend_awareness()
+        assert (
+            f"- `/skills/project/` -> `{config.paths.skills_project_dir}/`" not in result
+        )
+        assert "| `/skills/project/` | Project-scoped skills" not in result
+        assert 'read_file("/skills/my-workflow/SKILL.md")' in result
+
+    def test_build_path_mappings_alias(self, mock_config: AppConfig) -> None:
+        assert mock_config.build_path_mappings() == mock_config.build_backend_awareness()
+
+
 class TestBuildSystemPrompt:
     """_build_system_prompt combines home and cwd AGENTS.md content."""
 

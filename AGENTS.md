@@ -96,7 +96,7 @@ When my-agent starts from any working directory, files are resolved in this orde
 
 This means you can run `my-agent chat` from any project directory and it will automatically pick up project-local config while sharing the same global checkpoints, memories, and skills.
 
-A **dynamically-generated** Host path mappings section is appended to this prompt at session start, telling you how to convert `/cwd/`, `/skills/`, and `/skills/project/` virtual paths back to real filesystem paths for `execute` commands.
+A **dynamically-generated** "Backend & filesystem self-awareness" section is appended to this prompt at session start with host path mappings, routing rules, tool usage, and examples for file tools vs shell commands.
 
 ## Skills
 
