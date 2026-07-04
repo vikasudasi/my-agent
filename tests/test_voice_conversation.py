@@ -176,8 +176,8 @@ class TestConversationPrompt:
     def test_forbids_writing_speaker_note_in_assistant_text(self) -> None:
         from my_agent.voice.companion import CONVERSATION_MODE_PROMPT
 
-        assert "do **not** write \"Speaker note:\"" in CONVERSATION_MODE_PROMPT
-        assert "always write a normal, complete Assistant reply" in CONVERSATION_MODE_PROMPT
+        assert 'do **not** write "Speaker note:"' in CONVERSATION_MODE_PROMPT
+        assert "write the full answer on the terminal" in CONVERSATION_MODE_PROMPT
 
 
 class TestSanitizeSpokenText:

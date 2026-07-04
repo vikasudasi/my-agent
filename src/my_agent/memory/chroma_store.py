@@ -52,12 +52,18 @@ class ChromaConversationStore:
         user_text = ""
         assistant_text = ""
 
-        for message in messages:
+        for index, message in enumerate(messages):
             role, content = _message_role_and_content(message)
             if not content.strip():
                 continue
 
-            message_id = _message_id(thread_id, turn_index, role, content)
+            message_id = _message_id(
+                thread_id,
+                turn_index,
+                role,
+                content,
+                disambiguator=_message_disambiguator(message, index),
+            )
             documents.append(
                 Document(
                     page_content=content,
@@ -88,7 +94,11 @@ class ChromaConversationStore:
                         "timestamp": timestamp,
                         "turn_index": turn_index,
                         "message_id": _message_id(
-                            thread_id, turn_index, "turn_summary", summary
+                            thread_id,
+                            turn_index,
+                            "turn_summary",
+                            summary,
+                            disambiguator="turn_summary",
                         ),
                         "doc_type": "turn_summary",
                     },
@@ -98,10 +108,12 @@ class ChromaConversationStore:
         if not documents:
             return 0
 
-        self._vector_store.add_documents(
-            documents,
-            ids=[str(doc.metadata["message_id"]) for doc in documents],
-        )
+        ids = [str(doc.metadata["message_id"]) for doc in documents]
+        ids = _ensure_unique_ids(ids)
+        for doc, doc_id in zip(documents, ids, strict=True):
+            doc.metadata["message_id"] = doc_id
+
+        self._vector_store.add_documents(documents, ids=ids)
         return len(documents)
 
     def delete_thread(self, thread_id: str) -> int:
@@ -204,10 +216,43 @@ def _message_role_and_content(message: BaseMessage) -> tuple[str, str]:
     return str(message_type), stringify_content(getattr(message, "content", ""))
 
 
-def _message_id(thread_id: str, turn_index: int, role: str, content: str) -> str:
+def _message_disambiguator(message: BaseMessage, index: int) -> str:
+    """Stable per-message suffix so identical content does not collide."""
+    message_id = getattr(message, "id", None)
+    if message_id:
+        return str(message_id)
+    tool_call_id = getattr(message, "tool_call_id", None)
+    if tool_call_id:
+        return str(tool_call_id)
+    return str(index)
+
+
+def _message_id(
+    thread_id: str,
+    turn_index: int,
+    role: str,
+    content: str,
+    *,
+    disambiguator: str,
+) -> str:
     digest = hashlib.sha256(
-        f"{thread_id}:{turn_index}:{role}:{content}".encode("utf-8")
+        f"{thread_id}:{turn_index}:{role}:{disambiguator}:{content}".encode("utf-8")
     ).hexdigest()[:16]
     return f"{thread_id}-{turn_index}-{role}-{digest}"
+
+
+def _ensure_unique_ids(ids: list[str]) -> list[str]:
+    """Guarantee unique Chroma ids within a single upsert batch."""
+    seen: set[str] = set()
+    unique: list[str] = []
+    for doc_id in ids:
+        candidate = doc_id
+        suffix = 2
+        while candidate in seen:
+            candidate = f"{doc_id}-dup{suffix}"
+            suffix += 1
+        seen.add(candidate)
+        unique.append(candidate)
+    return unique
 
 
