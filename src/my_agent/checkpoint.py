@@ -13,6 +13,8 @@ from langgraph.checkpoint.memory import InMemorySaver, MemorySaver
 
 from my_agent.config import AppConfig
 
+from my_agent.memory.chroma_store import delete_conversation_index
+
 _LATEST_THREADS_SQL = """
 SELECT c.thread_id, c.type, c.checkpoint
 FROM checkpoints c
@@ -107,9 +109,10 @@ def list_threads(
 
 
 def delete_thread(config: AppConfig, thread_id: str) -> None:
-    """Delete all checkpoint data for a thread."""
+    """Delete all checkpoint data and Chroma index entries for a thread."""
     checkpointer = get_checkpointer(config)
     checkpointer.delete_thread(thread_id)
+    delete_conversation_index(config, thread_id)
 
 
 def prune_threads(
@@ -153,6 +156,7 @@ def prune_threads(
         checkpointer = get_checkpointer(config)
         for thread_id in to_delete:
             checkpointer.delete_thread(thread_id)
+            delete_conversation_index(config, thread_id)
         vacuumed = vacuum and bool(to_delete) and config.checkpoint.backend == "sqlite"
         if vacuumed:
             _vacuum_sqlite(config)

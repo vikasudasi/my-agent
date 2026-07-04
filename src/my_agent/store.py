@@ -10,6 +10,7 @@ from langgraph.store.base import BaseStore
 from langgraph.store.memory import InMemoryStore
 
 from my_agent.config import AppConfig
+from my_agent.messages import snippet as text_snippet
 
 MEMORIES_NAMESPACE: tuple[str, ...] = ("memories",)
 
@@ -115,9 +116,4 @@ def _extract_content(value: dict) -> str:
 
 
 def _snippet(text: str, *, max_len: int = 72) -> str | None:
-    if not text.strip():
-        return None
-    compact = " ".join(text.split())
-    if len(compact) <= max_len:
-        return compact
-    return f"{compact[: max_len - 1]}…"
+    return text_snippet(text, max_len, empty=None)

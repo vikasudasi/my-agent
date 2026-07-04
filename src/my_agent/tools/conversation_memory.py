@@ -3,6 +3,7 @@ from __future__ import annotations
 from langchain_core.tools import tool
 
 from my_agent.memory.chroma_store import ChromaConversationStore
+from my_agent.messages import snippet as text_snippet
 
 
 def build_conversation_tools(store: ChromaConversationStore) -> list:
@@ -23,7 +24,7 @@ def build_conversation_tools(store: ChromaConversationStore) -> list:
                     [
                         f"{index}. thread_id={hit.thread_id}",
                         f"   role={hit.role} turn={hit.turn_index} at={hit.timestamp}",
-                        f"   snippet: {_snippet(hit.content, 300)}",
+                        f"   snippet: {text_snippet(hit.content, 300) or ''}",
                     ]
                 )
             )
@@ -42,7 +43,7 @@ def build_conversation_tools(store: ChromaConversationStore) -> list:
                 "\n".join(
                     [
                         f"- [{hit.timestamp}] {hit.role} (turn {hit.turn_index})",
-                        _snippet(hit.content, 500),
+                        text_snippet(hit.content, 500) or "",
                     ]
                 )
             )
@@ -70,9 +71,3 @@ def build_conversation_tools(store: ChromaConversationStore) -> list:
 
     return [search_past_conversations, get_conversation, list_recent_conversations]
 
-
-def _snippet(text: str, max_len: int) -> str:
-    cleaned = " ".join(text.split())
-    if len(cleaned) <= max_len:
-        return cleaned
-    return cleaned[: max_len - 3] + "..."
