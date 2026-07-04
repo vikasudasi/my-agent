@@ -186,9 +186,14 @@ def _resolve_task_with_audio(
     return transcript
 
 
-def _read_chat_input(*, voice_enabled: bool, voice_config) -> str | None:
+def _read_chat_input(
+    *,
+    voice_enabled: bool,
+    voice_config,
+    label: str = "You",
+) -> str | None:
     """Return user text, or None when a voice turn is cancelled."""
-    prompt = "[bold yellow]You[/bold yellow]"
+    prompt = f"[bold yellow]{label}[/bold yellow]"
     if voice_enabled:
         prompt += " [dim](/mic for voice)[/dim]"
     prompt += ": "
@@ -578,16 +583,24 @@ def _chat_loop(
         except KeyboardInterrupt:
             # Ctrl+C mid-turn: let user redirect the agent
             _console.print()
-            _console.print("[yellow]Interrupted. Type your correction or press Enter to discard:[/yellow]")
+            interrupt_hint = "Interrupted. Type a correction"
+            if voice_enabled:
+                interrupt_hint += ", /mic to speak"
+            interrupt_hint += ", or press Enter to discard:"
+            _console.print(f"[yellow]{interrupt_hint}[/yellow]")
             try:
-                correction = read_input(_console, "[bold yellow]Redirect:[/bold yellow] ")
+                correction = _read_chat_input(
+                    voice_enabled=voice_enabled,
+                    voice_config=voice_config,
+                    label="Redirect",
+                )
             except (EOFError, KeyboardInterrupt):
                 _console.print("\n[dim]Discarded.[/dim]")
                 _console.print()
                 _console.print(Rule(style="bright_black"))
                 _console.print()
                 continue
-            if correction.strip():
+            if correction and correction.strip():
                 turn_index += 1
                 run_turn(
                     agent,

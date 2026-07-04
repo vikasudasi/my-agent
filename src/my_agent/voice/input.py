@@ -20,6 +20,12 @@ class ConfirmAction(Enum):
     RERECORD = "rerecord"
 
 
+def _print_transcript_preview(console: Console, transcript: str) -> None:
+    """Show transcribed speech without blocking for confirmation."""
+    console.print()
+    console.print(f'[bold yellow]You said:[/bold yellow] [cyan]"{transcript.strip()}"[/cyan]')
+
+
 def _print_transcript_menu(
     console: Console,
     transcript: str,
@@ -118,6 +124,7 @@ def capture_and_transcribe(
             console.print(f"[dim]STT usage: {', '.join(parts)}[/dim]")
 
         if not voice_config.confirm_before_send:
+            _print_transcript_preview(console, result.text)
             return result.text
 
         decision = confirm_transcript(console, result.text, allow_rerecord=True)

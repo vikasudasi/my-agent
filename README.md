@@ -27,7 +27,7 @@ Run it from any project directory. Your personal defaults travel with you; proje
 
 ## Features
 
-- **Interactive chat** — REPL-style terminal chat with streaming output, thread resume, and Ctrl+C redirect
+- **Interactive chat** — REPL-style terminal chat with streaming output, thread resume, and Ctrl+C redirect (type or `/mic` a correction)
 - **One-shot tasks** — run a single prompt and exit; optional `--audio` for voice-driven tasks
 - **Persistent threads** — chat history survives restarts via SQLite checkpoints
 - **Context summarization** — automatically compresses long conversations to stay within context limits
@@ -256,7 +256,7 @@ Assistant: Here are the top results:
 
 - Use **headphones** to reduce mic picking up speaker output.
 - Pick a macOS voice: `say -v '?'` lists voices; set `tts_voice` in config (e.g. `Daniel`).
-- Conversation mode skips transcription confirm (`confirm_before_send = false`) for faster turns.
+- Conversation mode auto-sends after `/mic` (no Enter/e/r/c menu) but still prints **You said:** with the transcript.
 
 ```toml
 [voice.conversation]

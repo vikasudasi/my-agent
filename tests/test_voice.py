@@ -18,6 +18,7 @@ from my_agent.voice.capture import (
 from my_agent.voice.input import ConfirmAction, capture_and_transcribe, confirm_transcript
 from my_agent.voice.transcribe import (
     TranscriptionError,
+    TranscriptionResult,
     audio_format_from_path,
     transcribe_audio,
     transcribe_file,
@@ -158,6 +159,26 @@ class TestConfirmTranscript:
 
 
 class TestCaptureAndTranscribe:
+    def test_auto_send_shows_transcript_preview(self) -> None:
+        console = MagicMock()
+        voice_config = VoiceConfig(confirm_before_send=False)
+
+        with patch(
+            "my_agent.voice.input.record_push_to_talk",
+            return_value=b"wav-bytes",
+        ):
+            result = capture_and_transcribe(
+                console,
+                voice_config,
+                transcribe=lambda _audio: TranscriptionResult(text="hello there"),
+            )
+
+        assert result == "hello there"
+        console.print.assert_any_call(
+            '[bold yellow]You said:[/bold yellow] [cyan]"hello there"[/cyan]'
+        )
+        console.input.assert_not_called()
+
     def test_missing_dependencies_show_friendly_message(self) -> None:
         console = MagicMock()
         voice_config = VoiceConfig()

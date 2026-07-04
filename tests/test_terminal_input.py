@@ -85,3 +85,34 @@ class TestReadChatInput:
 
         assert result == "spoken text"
         capture_mock.assert_called_once()
+
+    def test_custom_label_in_prompt(self) -> None:
+        voice_config = MagicMock()
+        with patch("my_agent.cli.read_input", return_value="fix that") as read_input_mock:
+            result = _read_chat_input(
+                voice_enabled=True,
+                voice_config=voice_config,
+                label="Redirect",
+            )
+
+        assert result == "fix that"
+        read_input_mock.assert_called_once()
+        prompt = read_input_mock.call_args.args[1]
+        assert "Redirect" in prompt
+        assert "/mic for voice" in prompt
+
+    def test_redirect_mic_invokes_capture(self) -> None:
+        voice_config = MagicMock()
+        with patch("my_agent.cli.read_input", return_value="/mic"):
+            with patch(
+                "my_agent.cli.capture_and_transcribe",
+                return_value="spoken correction",
+            ) as capture_mock:
+                result = _read_chat_input(
+                    voice_enabled=True,
+                    voice_config=voice_config,
+                    label="Redirect",
+                )
+
+        assert result == "spoken correction"
+        capture_mock.assert_called_once()

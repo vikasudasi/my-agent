@@ -64,6 +64,7 @@ Notes:
   Resuming shows: Resuming thread <uuid> (N messages)
   In voice mode, type /mic then hold Space to record.
   After transcription: Enter to send, e to edit, r to re-record, c to cancel.
+  Ctrl+C during a turn opens Redirect — type or /mic a correction, Enter to discard.
   In conversation mode, the agent speaks often (JARVIS-style): acknowledgments,
   progress before tools, and wrap-ups. Speaker note lines show what is spoken aloud.
 
