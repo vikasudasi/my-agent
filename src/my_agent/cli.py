@@ -21,6 +21,7 @@ from my_agent.help_text import render_help
 from my_agent.messages import snippet as text_snippet
 from my_agent.runner import get_thread_state_info, run_turn
 from my_agent.store import list_memories, read_memory
+from my_agent.voice import TranscriptionError, capture_and_transcribe, transcribe_file
 
 app = typer.Typer(
     name="my-agent",
@@ -89,14 +90,19 @@ def _resolve_thread_id(
     return str(uuid.uuid4()), False
 
 
-def _print_chat_banner(agent, thread_id: str, *, is_resume: bool) -> None:
+def _print_chat_banner(agent, thread_id: str, *, is_resume: bool, voice_enabled: bool) -> None:
+    voice_hint = ""
+    if voice_enabled:
+        voice_hint = "\n[italic]Voice mode: type normally or /mic to speak[/italic]"
+
     if is_resume:
         info = get_thread_state_info(agent, thread_id)
         msg_count = f" ({info.message_count} messages)" if info and info.message_count else ""
         _console.print(
             Panel(
                 f"[bold]Resuming thread[/bold] {thread_id}{msg_count}\n"
-                "[italic]Type 'exit' or 'quit' to leave[/italic]",
+                "[italic]Type 'exit' or 'quit' to leave[/italic]"
+                f"{voice_hint}",
                 title="[bold cyan]my-agent[/bold cyan]",
                 border_style="bright_blue",
                 padding=(1, 2),
@@ -106,7 +112,8 @@ def _print_chat_banner(agent, thread_id: str, *, is_resume: bool) -> None:
         _console.print(
             Panel(
                 f"[dim]thread_id={thread_id}[/dim]\n"
-                "[italic]Type 'exit' or 'quit' to leave[/italic]",
+                "[italic]Type 'exit' or 'quit' to leave[/italic]"
+                f"{voice_hint}",
                 title="[bold cyan]my-agent[/bold cyan]  [dim]new session[/dim]",
                 border_style="bright_blue",
                 padding=(1, 2),
@@ -121,6 +128,62 @@ def _initial_turn_index(agent, thread_id: str) -> int:
 
 def _snippet(text: str | None, *, max_len: int = 72) -> str:
     return text_snippet(text, max_len, empty="(no user message)") or "(no user message)"
+
+
+def _print_transcription_usage(result) -> None:
+    parts: list[str] = []
+    if result.seconds is not None:
+        parts.append(f"{result.seconds:.1f}s audio")
+    if result.cost is not None:
+        parts.append(f"${result.cost:.4f}")
+    if parts:
+        _console.print(f"[dim]STT usage: {', '.join(parts)}[/dim]")
+
+
+def _resolve_task_with_audio(
+    task: str | None,
+    audio: Path | None,
+    voice_config,
+) -> str:
+    if audio is None:
+        if not task or not task.strip():
+            raise typer.BadParameter("Provide TASK and/or --audio.")
+        return task.strip()
+
+    if not audio.is_file():
+        raise typer.BadParameter(f"Audio file not found: {audio}")
+
+    try:
+        result = transcribe_file(audio.resolve(), voice_config)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except TranscriptionError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    _print_transcription_usage(result)
+    transcript = result.text.strip()
+    if task and task.strip():
+        return f"{task.strip()}\n\n{transcript}"
+    return transcript
+
+
+def _read_chat_input(*, voice_enabled: bool, voice_config) -> str | None:
+    """Return user text, or None when a voice turn is cancelled."""
+    prompt = "[bold yellow]You[/bold yellow]"
+    if voice_enabled:
+        prompt += " [dim](/mic for voice)[/dim]"
+    prompt += ": "
+
+    try:
+        user_input = _console.input(prompt)
+    except (EOFError, KeyboardInterrupt):
+        raise
+
+    stripped = user_input.strip()
+    if voice_enabled and stripped.lower() in {"/mic", "/voice"}:
+        return capture_and_transcribe(_console, voice_config)
+
+    return user_input
 
 
 @app.command("help")
@@ -380,11 +443,17 @@ def chat(
         "--quiet",
         help="Hide reasoning, tool calls, tool results, and loaded skills.",
     ),
+    voice: bool = typer.Option(
+        False,
+        "--voice",
+        help="Enable voice input in chat (/mic for push-to-talk).",
+    ),
 ) -> None:
     """Interactive REPL chat with the agent."""
     config_path = _resolve_config_path(config)
     app_config, chroma_store, agent = get_runtime(config_path)
     display = _resolve_display(app_config.display, verbose=verbose, quiet=quiet)
+    voice_enabled = voice or app_config.voice.enabled
     active_thread, is_resume = _resolve_thread_id(
         thread_id=thread_id,
         continue_=continue_,
@@ -392,14 +461,20 @@ def chat(
     )
     turn_index = _initial_turn_index(agent, active_thread)
 
-    _print_chat_banner(agent, active_thread, is_resume=is_resume)
+    _print_chat_banner(agent, active_thread, is_resume=is_resume, voice_enabled=voice_enabled)
 
     while True:
         try:
-            user_input = _console.input("[bold yellow]You:[/bold yellow] ")
+            user_input = _read_chat_input(
+                voice_enabled=voice_enabled,
+                voice_config=app_config.voice,
+            )
         except (EOFError, KeyboardInterrupt):
             _console.print("\n[dim]Bye.[/dim]")
             raise typer.Exit(0) from None
+
+        if user_input is None:
+            continue
 
         if user_input.strip().lower() in {"exit", "quit"}:
             _console.print("[dim]Bye.[/dim]")
@@ -452,8 +527,44 @@ def chat(
 
 
 @app.command()
+def transcribe(
+    audio: Path = typer.Argument(
+        ...,
+        help="Audio file to transcribe (wav, mp3, flac, m4a, ogg, webm, aac).",
+        exists=True,
+        dir_okay=False,
+        resolve_path=True,
+    ),
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        help="Path to config.toml (default: ./config.toml).",
+        exists=True,
+        dir_okay=False,
+        resolve_path=True,
+    ),
+) -> None:
+    """Transcribe an audio file via OpenRouter speech-to-text."""
+    config_path = _resolve_config_path(config)
+    app_config = load_config(Path(config_path) if config_path else None)
+
+    try:
+        result = transcribe_file(audio, app_config.voice)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except TranscriptionError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    _print_transcription_usage(result)
+    typer.echo(result.text)
+
+
+@app.command()
 def run(
-    task: str = typer.Argument(..., help="One-shot task for the agent."),
+    task: Optional[str] = typer.Argument(
+        None,
+        help="One-shot task for the agent.",
+    ),
     config: Optional[Path] = typer.Option(
         None,
         "--config",
@@ -482,11 +593,20 @@ def run(
         "--quiet",
         help="Hide reasoning, tool calls, tool results, and loaded skills.",
     ),
+    audio: Optional[Path] = typer.Option(
+        None,
+        "--audio",
+        help="Transcribe an audio file and use the text as the task.",
+        exists=True,
+        dir_okay=False,
+        resolve_path=True,
+    ),
 ) -> None:
     """Run a single task and exit."""
     config_path = _resolve_config_path(config)
     app_config, chroma_store, agent = get_runtime(config_path)
     display = _resolve_display(app_config.display, verbose=verbose, quiet=quiet)
+    resolved_task = _resolve_task_with_audio(task, audio, app_config.voice)
     active_thread, _ = _resolve_thread_id(
         thread_id=thread_id,
         continue_=continue_,
@@ -498,7 +618,7 @@ def run(
         agent,
         app_config,
         chroma_store,
-        user_message=task,
+        user_message=resolved_task,
         thread_id=active_thread,
         turn_index=turn_index,
         stream=True,
