@@ -98,7 +98,7 @@ def _resolve_thread_id(
 def _print_chat_banner(agent, thread_id: str, *, is_resume: bool, voice_enabled: bool) -> None:
     voice_hint = ""
     if voice_enabled:
-        voice_hint = "\n[italic]Voice mode: type normally or /mic to speak[/italic]"
+        voice_hint = "\n[italic]Voice: /mic to speak · after transcription: Enter=send, e=edit, r=re-record[/italic]"
 
     if is_resume:
         info = get_thread_state_info(agent, thread_id)

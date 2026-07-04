@@ -49,7 +49,7 @@ Run it from any project directory. Your personal defaults travel with you; proje
 - [uv](https://docs.astral.sh/uv/) or pip
 - [OpenRouter](https://openrouter.ai/) API key
 - Tavily API key (optional, for web search)
-- Voice extras (optional): `pip install 'my-agent[voice]'` for push-to-talk capture
+- Voice extras (optional): `pip install -r requirements-voice.txt` or `pip install 'my-agent[voice]'` for push-to-talk capture
 
 ---
 
@@ -61,10 +61,9 @@ cd my-agent
 
 # Create virtual environment and install
 uv venv
-uv pip install -e .
-
-# Optional: voice input (push-to-talk in chat)
-uv pip install -e '.[voice]'
+uv pip install -r requirements-voice.txt   # includes push-to-talk (/mic) deps
+# Or: uv pip install -e .                    # base only (no /mic)
+# Or: uv pip install -e '.[voice]'           # same as requirements-voice.txt
 
 # Configure
 cp config.toml.example config.toml
@@ -174,7 +173,8 @@ Speech-to-text runs through OpenRouter's transcription API (same `OPENROUTER_API
 
 ```bash
 my-agent chat --voice
-# In the REPL, type /mic then hold Space to record (requires my-agent[voice])
+# In the REPL: /mic → hold Space to record → release to transcribe
+# Then: Enter = send, e = edit, r = re-record, c = cancel
 ```
 
 **One-shot with audio** — transcribe a file and run it as a task:
@@ -494,8 +494,9 @@ my-agent/
 ## Development
 
 ```bash
-# Install with test dependencies
-uv pip install -e '.[test]'
+# Install with voice + test dependencies
+uv pip install -r requirements-dev.txt
+# Or: uv pip install -e '.[voice,test]'
 
 # Run the test suite
 pytest tests/
@@ -504,12 +505,15 @@ pytest tests/
 pytest tests/ --cov=my_agent
 ```
 
-Optional dependency groups:
+Optional dependency groups (also available as `requirements*.txt` wrappers):
 
 | Extra | Install | Purpose |
 |-------|---------|---------|
-| `voice` | `pip install 'my-agent[voice]'` | Push-to-talk audio capture in chat |
-| `test` | `pip install 'my-agent[test]'` | pytest and coverage |
+| (base) | `pip install -r requirements.txt` | Core agent |
+| `voice` | `pip install -r requirements-voice.txt` | Push-to-talk audio capture in chat |
+| `voice` + `test` | `pip install -r requirements-dev.txt` | Development and pytest |
+| `voice` | `pip install 'my-agent[voice]'` | Same as `requirements-voice.txt` when published |
+| `test` | `pip install 'my-agent[test]'` | pytest and coverage only |
 
 ---
 

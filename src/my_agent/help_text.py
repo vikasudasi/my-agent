@@ -62,6 +62,7 @@ Notes:
   --continue and --thread-id cannot be used together.
   Resuming shows: Resuming thread <uuid> (N messages)
   In voice mode, type /mic then hold Space to record.
+  After transcription: Enter to send, e to edit, r to re-record, c to cancel.
 
 Examples:
   my-agent chat

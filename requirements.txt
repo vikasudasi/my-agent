@@ -1,0 +1,3 @@
+# Base install (run from repo root).
+# Canonical dependency list lives in pyproject.toml.
+-e .

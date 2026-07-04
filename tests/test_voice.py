@@ -10,8 +10,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from my_agent.config import VoiceConfig
-from my_agent.voice.capture import CaptureCancelled, record_push_to_talk
-from my_agent.voice.input import ConfirmAction, confirm_transcript
+from my_agent.voice.capture import (
+    CaptureCancelled,
+    CaptureDependencyError,
+    record_push_to_talk,
+)
+from my_agent.voice.input import ConfirmAction, capture_and_transcribe, confirm_transcript
 from my_agent.voice.transcribe import (
     TranscriptionError,
     audio_format_from_path,
@@ -133,10 +137,44 @@ class TestConfirmTranscript:
         console.input.return_value = "r"
         assert confirm_transcript(console, "hello") is ConfirmAction.RERECORD
 
+    def test_invalid_choice_shows_hint(self) -> None:
+        console = MagicMock()
+        console.input.side_effect = ["x", ""]
+        assert confirm_transcript(console, "hello") == "hello"
+        console.print.assert_any_call(
+            "[yellow]Invalid choice. Press Enter to send, e to edit, r to re-record, or c to cancel.[/yellow]"
+        )
+
+    def test_edit_empty_keeps_current(self) -> None:
+        console = MagicMock()
+        console.input.side_effect = ["e", "", ""]
+        assert confirm_transcript(console, "hello") == "hello"
+        console.print.assert_any_call("[yellow]No changes — keeping current text.[/yellow]")
+
     def test_cancel_action(self) -> None:
         console = MagicMock()
         console.input.return_value = "c"
         assert confirm_transcript(console, "hello") is ConfirmAction.CANCEL
+
+
+class TestCaptureAndTranscribe:
+    def test_missing_dependencies_show_friendly_message(self) -> None:
+        console = MagicMock()
+        voice_config = VoiceConfig()
+
+        with patch(
+            "my_agent.voice.input.record_push_to_talk",
+            side_effect=CaptureDependencyError(
+                "Install my-agent with: pip install 'my-agent[voice]'"
+            ),
+        ):
+            result = capture_and_transcribe(console, voice_config)
+
+        assert result is None
+        console.print.assert_any_call(
+            "[red]Voice input unavailable:[/red] "
+            "Install my-agent with: pip install 'my-agent[voice]'"
+        )
 
 
 class TestRecordPushToTalk:
