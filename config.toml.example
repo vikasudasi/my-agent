@@ -55,6 +55,17 @@ search_depth = "basic"
 include_answer = false
 include_raw_content = false
 
+[voice]
+# Speech-to-text via OpenRouter (/api/v1/audio/transcriptions).
+# Uses OPENROUTER_API_KEY. Enable with: my-agent chat --voice
+# Push-to-talk capture requires: pip install 'my-agent[voice]'
+enabled = false
+model = "openai/whisper-large-v3"
+# Optional ISO-639-1 language hint (e.g. "en"). Empty = auto-detect.
+language = ""
+max_duration_seconds = 120
+confirm_before_send = true
+
 [mcp]
 # Enable/disable MCP server integration (default: true)
 # enabled = true

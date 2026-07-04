@@ -51,6 +51,35 @@ class TestLoadConfig:
                 with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
                     load_config(config_path=config_file)
 
+    def test_parses_voice_section(self, tmp_path: Path) -> None:
+        from my_agent.config import VoiceConfig
+
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(
+            """
+[llm]
+model = "test-model"
+
+[voice]
+enabled = true
+model = "openai/whisper-1"
+language = "en"
+max_duration_seconds = 45
+confirm_before_send = false
+"""
+        )
+        with patch("my_agent.config.load_dotenv", return_value=None):
+            with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}):
+                config = load_config(config_path=config_file)
+
+        assert config.voice == VoiceConfig(
+            enabled=True,
+            model="openai/whisper-1",
+            language="en",
+            max_duration_seconds=45.0,
+            confirm_before_send=False,
+        )
+
 
 class TestExpandsUserPaths:
     """Path expansion in load_config handles ~ and relative paths."""

@@ -75,6 +75,15 @@ class SummarizationConfig:
 
 
 @dataclass(frozen=True)
+class VoiceConfig:
+    enabled: bool = False
+    model: str = "openai/whisper-large-v3"
+    language: str = ""
+    max_duration_seconds: float = 120.0
+    confirm_before_send: bool = True
+
+
+@dataclass(frozen=True)
 class CheckpointConfig:
     backend: str = "sqlite"
     sqlite_path: str = "checkpoints.sqlite"
@@ -113,6 +122,7 @@ class AppConfig:
     memory: MemoryConfig
     summarization: SummarizationConfig
     tavily: TavilyConfig
+    voice: VoiceConfig
     display: DisplayConfig
     checkpoint: CheckpointConfig
     store: StoreConfig
@@ -268,6 +278,7 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
     memory_section = raw.get("memory", {})
     summarization_section = raw.get("summarization", {})
     tavily_section = raw.get("tavily", {})
+    voice_section = raw.get("voice", {})
     display_section = raw.get("display", {})
     checkpoint_section = raw.get("checkpoint", {})
     store_section = raw.get("store", {})
@@ -388,6 +399,15 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
             search_depth=str(tavily_section.get("search_depth", "basic")),
             include_answer=bool(tavily_section.get("include_answer", False)),
             include_raw_content=bool(tavily_section.get("include_raw_content", False)),
+        ),
+        voice=VoiceConfig(
+            enabled=bool(voice_section.get("enabled", False)),
+            model=str(voice_section.get("model", "openai/whisper-large-v3")),
+            language=str(voice_section.get("language", "")),
+            max_duration_seconds=float(
+                voice_section.get("max_duration_seconds", 120.0)
+            ),
+            confirm_before_send=bool(voice_section.get("confirm_before_send", True)),
         ),
         display=DisplayConfig(
             show_reasoning=bool(display_section.get("show_reasoning", True)),

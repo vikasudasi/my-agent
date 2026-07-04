@@ -17,6 +17,7 @@ my-agent — local macOS deep agent (LangChain Deep Agents + OpenRouter)
 Command tree:
   chat                         Interactive REPL
   run <task>                   One-shot task
+  transcribe <audio>           Transcribe an audio file (OpenRouter STT)
   threads list                 List saved chat threads
   threads prune                Delete old threads (retention limits)
   threads delete <id>          Delete one thread
@@ -52,6 +53,7 @@ Each session prints a thread_id at startup. Type exit or quit to leave.
 Options:
   --thread-id TEXT    Resume a specific saved thread
   --continue          Resume the most recently updated thread
+  --voice             Enable voice input (/mic for push-to-talk)
   --verbose           Show reasoning, tool calls, tool results, loaded skills
   --quiet             Hide reasoning, tool calls, tool results, loaded skills
   --config FILE       Path to config.toml
@@ -59,9 +61,11 @@ Options:
 Notes:
   --continue and --thread-id cannot be used together.
   Resuming shows: Resuming thread <uuid> (N messages)
+  In voice mode, type /mic then hold Space to record.
 
 Examples:
   my-agent chat
+  my-agent chat --voice
   my-agent chat --continue
   my-agent chat --thread-id <uuid>
   my-agent chat --verbose
@@ -71,9 +75,10 @@ _RUN = """\
 my-agent run — run a single task and exit
 
 Arguments:
-  TASK                One-shot prompt for the agent
+  TASK                One-shot prompt for the agent (optional with --audio)
 
 Options:
+  --audio FILE        Transcribe audio via OpenRouter and use as the task
   --thread-id TEXT    Attach to an existing thread (default: new UUID)
   --continue          Use the most recently updated thread
   --verbose           Show reasoning, tool calls, tool results, loaded skills
@@ -82,8 +87,28 @@ Options:
 
 Examples:
   my-agent run "List the five largest files in my Downloads folder"
+  my-agent run --audio question.wav
+  my-agent run "Summarize this:" --audio meeting.mp3
   my-agent run --continue "Now sort them by date"
   my-agent run --verbose "Summarize today's AI news"
+"""
+
+_TRANSCRIBE = """\
+my-agent transcribe — transcribe an audio file via OpenRouter STT
+
+Arguments:
+  AUDIO               Audio file (wav, mp3, flac, m4a, ogg, webm, aac)
+
+Options:
+  --config FILE       Path to config.toml
+
+Config ([voice] in config.toml):
+  model               STT model slug (default: openai/whisper-large-v3)
+  language            Optional ISO-639-1 hint (empty = auto-detect)
+
+Examples:
+  my-agent transcribe question.wav
+  my-agent transcribe meeting.mp3
 """
 
 _THREADS = """\
@@ -215,6 +240,7 @@ _TOPICS: tuple[HelpTopic, ...] = (
     HelpTopic("overview", ("", "all", "commands"), "All commands", _OVERVIEW),
     HelpTopic("chat", (), "Interactive REPL", _CHAT),
     HelpTopic("run", (), "One-shot task", _RUN),
+    HelpTopic("transcribe", (), "Speech-to-text", _TRANSCRIBE),
     HelpTopic("threads", (), "Thread management", _THREADS),
     HelpTopic("threads list", ("threads-list",), "List threads", _THREADS_LIST),
     HelpTopic("threads prune", ("threads-prune",), "Prune threads", _THREADS_PRUNE),
