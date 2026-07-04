@@ -27,6 +27,8 @@ from my_agent.terminal_input import (
     read_input,
 )
 from my_agent.voice import TranscriptionError, capture_and_transcribe, transcribe_file
+from my_agent.voice.conversation import create_voice_queue, effective_voice_config
+from my_agent.voice.synthesize import SynthesisError
 
 app = typer.Typer(
     name="my-agent",
@@ -95,9 +97,21 @@ def _resolve_thread_id(
     return str(uuid.uuid4()), False
 
 
-def _print_chat_banner(agent, thread_id: str, *, is_resume: bool, voice_enabled: bool) -> None:
+def _print_chat_banner(
+    agent,
+    thread_id: str,
+    *,
+    is_resume: bool,
+    voice_enabled: bool,
+    conversation_enabled: bool,
+) -> None:
     voice_hint = ""
-    if voice_enabled:
+    if conversation_enabled:
+        voice_hint = (
+            "\n[italic]Conversation mode: JARVIS-style companion — type or /mic · "
+            "expect frequent Speaker notes during work[/italic]"
+        )
+    elif voice_enabled:
         voice_hint = "\n[italic]Voice: /mic to speak · after transcription: Enter=send, e=edit, r=re-record[/italic]"
 
     if is_resume:
@@ -453,12 +467,38 @@ def chat(
         "--voice",
         help="Enable voice input in chat (/mic for push-to-talk).",
     ),
+    conversation: bool = typer.Option(
+        False,
+        "--conversation",
+        help="Voice companion mode: /mic input plus spoken companion audio.",
+    ),
 ) -> None:
     """Interactive REPL chat with the agent."""
     config_path = _resolve_config_path(config)
-    app_config, chroma_store, agent = get_runtime(config_path)
+    conversation_enabled = conversation
+    try:
+        app_config, chroma_store, agent = get_runtime(
+            config_path,
+            conversation=conversation_enabled,
+        )
+    except SynthesisError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     display = _resolve_display(app_config.display, verbose=verbose, quiet=quiet)
-    voice_enabled = voice or app_config.voice.enabled
+    conversation_active = app_config.voice_conversation.enabled
+    voice_enabled = voice or conversation_active or app_config.voice.enabled
+    voice_config = effective_voice_config(
+        app_config.voice,
+        conversation_enabled=conversation_active,
+    )
+    voice_queue = None
+    if conversation_active:
+        try:
+            voice_queue = create_voice_queue(
+                app_config.voice_conversation,
+                console=_console,
+            )
+        except SynthesisError as exc:
+            raise typer.BadParameter(str(exc)) from exc
     active_thread, is_resume = _resolve_thread_id(
         thread_id=thread_id,
         continue_=continue_,
@@ -466,7 +506,13 @@ def chat(
     )
     turn_index = _initial_turn_index(agent, active_thread)
 
-    _print_chat_banner(agent, active_thread, is_resume=is_resume, voice_enabled=voice_enabled)
+    _print_chat_banner(
+        agent,
+        active_thread,
+        is_resume=is_resume,
+        voice_enabled=voice_enabled,
+        conversation_enabled=conversation_active,
+    )
 
     enable_bracketed_paste()
     try:
@@ -476,11 +522,15 @@ def chat(
             chroma_store=chroma_store,
             display=display,
             voice_enabled=voice_enabled,
+            voice_config=voice_config,
+            voice_queue=voice_queue,
             active_thread=active_thread,
             turn_index=turn_index,
         )
     finally:
         disable_bracketed_paste()
+        if voice_queue is not None:
+            voice_queue.close()
 
 
 def _chat_loop(
@@ -490,6 +540,8 @@ def _chat_loop(
     chroma_store,
     display,
     voice_enabled: bool,
+    voice_config,
+    voice_queue,
     active_thread: str,
     turn_index: int,
 ) -> None:
@@ -497,7 +549,7 @@ def _chat_loop(
         try:
             user_input = _read_chat_input(
                 voice_enabled=voice_enabled,
-                voice_config=app_config.voice,
+                voice_config=voice_config,
             )
         except (EOFError, KeyboardInterrupt):
             _console.print("\n[dim]Bye.[/dim]")
@@ -521,6 +573,7 @@ def _chat_loop(
                 turn_index=turn_index,
                 stream=True,
                 display=display,
+                voice_queue=voice_queue,
             )
         except KeyboardInterrupt:
             # Ctrl+C mid-turn: let user redirect the agent
@@ -545,6 +598,7 @@ def _chat_loop(
                     turn_index=turn_index,
                     stream=True,
                     display=display,
+                    voice_queue=voice_queue,
                 )
             _console.print()
             _console.print(Rule(style="bright_black"))

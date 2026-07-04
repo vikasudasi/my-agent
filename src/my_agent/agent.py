@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from my_agent.tools.fetch_page import fetch_page
 from my_agent.tools.mcp_tools import load_mcp_tools
 from my_agent.store import get_store
 from my_agent.tools.tavily_search import build_tavily_tools
+from my_agent.voice.companion import CONVERSATION_MODE_PROMPT, build_speak_tool
 
 
 class _RefreshSkillsMiddleware(AgentMiddleware):
@@ -52,21 +54,26 @@ class _RefreshSkillsMiddleware(AgentMiddleware):
         return self.before_agent(state, runtime, config)
 
 
-@lru_cache(maxsize=4)
-def _build_agent_bundle(config_path: str | None) -> tuple:
+@lru_cache(maxsize=8)
+def _build_agent_bundle(config_path: str | None, conversation: bool) -> tuple:
     config = load_config(config_path=Path(config_path) if config_path else None)
+    if conversation and not config.voice_conversation.enabled:
+        config = replace(
+            config,
+            voice_conversation=replace(config.voice_conversation, enabled=True),
+        )
     chroma_store = ChromaConversationStore(config)
     agent = _create_agent(config, chroma_store)
     return config, chroma_store, agent
 
 
-def get_agent(config_path: str | None = None):
-    _, _, agent = _build_agent_bundle(config_path)
+def get_agent(config_path: str | None = None, *, conversation: bool = False):
+    _, _, agent = _build_agent_bundle(config_path, conversation)
     return agent
 
 
-def get_runtime(config_path: str | None = None):
-    return _build_agent_bundle(config_path)
+def get_runtime(config_path: str | None = None, *, conversation: bool = False):
+    return _build_agent_bundle(config_path, conversation)
 
 
 def create_delegate_agent(config_path: str | None = None):
@@ -145,24 +152,32 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
 
     mcp_tools = load_mcp_tools(config)
 
+    tools = [
+        fetch_page,
+        build_delegate_task_tool(config, chroma_store),
+        *build_conversation_tools(chroma_store),
+        *build_tavily_tools(config.tavily),
+        *mcp_tools,
+    ]
+    if config.voice_conversation.enabled:
+        tools.append(
+            build_speak_tool(max_chars=config.voice_conversation.max_speak_chars)
+        )
+
     system_prompt = (
         config.agent.system_prompt
         + "\n\n"
         + config.build_backend_awareness()
     )
+    if config.voice_conversation.enabled:
+        system_prompt += "\n\n" + CONVERSATION_MODE_PROMPT
 
     return create_deep_agent(
         model=f"openrouter:{config.llm.model}",
         system_prompt=system_prompt,
         backend=backend,
         middleware=middleware_stack,
-        tools=[
-            fetch_page,
-            build_delegate_task_tool(config, chroma_store),
-            *build_conversation_tools(chroma_store),
-            *build_tavily_tools(config.tavily),
-            *mcp_tools,
-        ],
+        tools=tools,
         memory=memory_sources,
         interrupt_on=interrupt_on,
         checkpointer=get_checkpointer(config),

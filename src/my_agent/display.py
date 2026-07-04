@@ -9,6 +9,7 @@ from rich.rule import Rule
 from rich.style import Style
 
 from my_agent.config import DisplayConfig
+from my_agent.voice.extract import VoiceTagStreamFilter
 
 
 # ── Color & style palette ─────────────────────────────────────────────────
@@ -29,9 +30,11 @@ class TurnStreamPrinter:
         config: DisplayConfig,
         *,
         output: TextIO | None = None,
+        voice_filter: VoiceTagStreamFilter | None = None,
     ) -> None:
         self._config = config
         self._console = Console(file=output or sys.stdout, highlight=False)
+        self._voice_filter = voice_filter
         self._assistant_header_printed = False
         self._printed_skills: set[str] = set()
         self._pending_tools: list[Any] = []
@@ -51,6 +54,13 @@ class TurnStreamPrinter:
     def finish(self) -> None:
         """Print any trailing tool results and ensure a newline after assistant text."""
         self._flush_completed_tools(force=True)
+        if self._voice_filter is not None:
+            trailing = self._voice_filter.flush()
+            if trailing:
+                if not self._assistant_header_printed:
+                    self._raw_print(ASSISTANT_LABEL, end=" ")
+                    self._assistant_header_printed = True
+                self._write(trailing)
         if self._assistant_header_printed:
             self._write("\n")
 
@@ -99,6 +109,10 @@ class TurnStreamPrinter:
         for token in stream.text:
             if not token:
                 continue
+            if self._voice_filter is not None:
+                token = self._voice_filter.feed(token)
+                if not token:
+                    continue
             if not self._assistant_header_printed:
                 self._raw_print(ASSISTANT_LABEL, end=" ")
                 self._assistant_header_printed = True

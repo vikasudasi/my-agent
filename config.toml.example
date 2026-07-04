@@ -66,6 +66,17 @@ language = ""
 max_duration_seconds = 120
 confirm_before_send = true
 
+[voice.conversation]
+# Companion audio during chat (--conversation). Terminal output stays full-fidelity;
+# spoken lines come from the speak tool and [voice]...[/voice] tags.
+enabled = false
+tts_backend = "macos"
+tts_voice = ""
+max_speak_chars = 500
+strip_voice_tags_from_terminal = true
+# Print "Speaker note: ..." on terminal for each phrase sent to TTS.
+show_speaker_notes = true
+
 [mcp]
 # Enable/disable MCP server integration (default: true)
 # enabled = true

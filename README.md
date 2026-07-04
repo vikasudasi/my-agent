@@ -16,6 +16,7 @@ Run it from any project directory. Your personal defaults travel with you; proje
 | **One-shot tasks** | `my-agent run "…"` for scripts, automation, and quick prompts |
 | **Persistent memory** | SQLite checkpoints, durable `/memories/` notes, and semantic search across past chats |
 | **Voice input** | Push-to-talk in chat (`/mic`) or transcribe audio files via OpenRouter STT |
+| **Conversation mode** | Companion audio via `--conversation` — terminal shows full answers, agent speaks brief updates |
 | **MCP integration** | Plug in local and remote MCP servers (stdio, HTTP, SSE, WebSocket) |
 | **Agent skills** | Markdown workflows the agent loads on demand — project or user scoped |
 | **Subagent delegation** | Spawn isolated subagents for complex tasks with live streaming progress |
@@ -192,6 +193,27 @@ my-agent transcribe recording.wav
 
 Supported formats: wav, mp3, flac, m4a, ogg, webm, aac.
 
+### Conversation mode (companion audio)
+
+Use `--conversation` for a JARVIS-style companion session: the agent speaks **often** \
+during work (acknowledgments, progress before tools, phase changes, wrap-ups) while \
+the terminal shows full detail. Input via keyboard or `/mic`. Companion lines also appear as **Speaker note** lines \
+on screen (what is being spoken aloud), separate from the main assistant answer.
+
+```bash
+my-agent chat --conversation
+```
+
+```toml
+[voice.conversation]
+enabled = false
+tts_backend = "macos"
+tts_voice = ""
+max_speak_chars = 500
+strip_voice_tags_from_terminal = true
+show_speaker_notes = true
+```
+
 ```toml
 [voice]
 enabled = false
@@ -297,6 +319,7 @@ Interactive REPL. Each session prints a `thread_id`. Type `exit` or `quit` to le
 | `--thread-id TEXT` | Resume a specific saved thread |
 | `--continue` | Resume the most recently updated thread |
 | `--voice` | Enable voice input (`/mic` for push-to-talk) |
+| `--conversation` | Voice companion mode: `/mic` input + spoken companion audio |
 | `--verbose` | Show reasoning, tool calls, tool results, and loaded skills |
 | `--quiet` | Hide reasoning, tool calls, tool results, and loaded skills |
 
@@ -304,6 +327,7 @@ Interactive REPL. Each session prints a `thread_id`. Type `exit` or `quit` to le
 my-agent chat
 my-agent chat --continue
 my-agent chat --voice
+my-agent chat --conversation
 my-agent chat --thread-id <uuid>
 ```
 

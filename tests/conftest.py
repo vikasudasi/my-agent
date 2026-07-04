@@ -20,6 +20,7 @@ from my_agent.config import (
     SummarizationConfig,
     TavilyConfig,
     VoiceConfig,
+    VoiceConversationConfig,
 )
 
 
@@ -68,6 +69,7 @@ def mock_config(tmp_project_root: Path) -> AppConfig:
         ),
         tavily=TavilyConfig(),
         voice=VoiceConfig(),
+        voice_conversation=VoiceConversationConfig(),
         display=DisplayConfig(),
         checkpoint=CheckpointConfig(backend="sqlite", sqlite_path=":memory:"),
         store=StoreConfig(backend="sqlite", sqlite_path=":memory:"),

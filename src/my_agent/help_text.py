@@ -54,6 +54,7 @@ Options:
   --thread-id TEXT    Resume a specific saved thread
   --continue          Resume the most recently updated thread
   --voice             Enable voice input (/mic for push-to-talk)
+  --conversation      Voice companion mode: /mic input + spoken companion audio
   --verbose           Show reasoning, tool calls, tool results, loaded skills
   --quiet             Hide reasoning, tool calls, tool results, loaded skills
   --config FILE       Path to config.toml
@@ -63,10 +64,13 @@ Notes:
   Resuming shows: Resuming thread <uuid> (N messages)
   In voice mode, type /mic then hold Space to record.
   After transcription: Enter to send, e to edit, r to re-record, c to cancel.
+  In conversation mode, the agent speaks often (JARVIS-style): acknowledgments,
+  progress before tools, and wrap-ups. Speaker note lines show what is spoken aloud.
 
 Examples:
   my-agent chat
   my-agent chat --voice
+  my-agent chat --conversation
   my-agent chat --continue
   my-agent chat --thread-id <uuid>
   my-agent chat --verbose
@@ -106,6 +110,12 @@ Options:
 Config ([voice] in config.toml):
   model               STT model slug (default: openai/whisper-large-v3)
   language            Optional ISO-639-1 hint (empty = auto-detect)
+
+Conversation mode (--conversation):
+  speak tool          Agent queues brief spoken status lines during a turn
+  [voice]...[/voice]  Optional spoken wrap-up tags in assistant text
+  Speaker note        Terminal line showing each phrase queued for audio
+  tts_backend         macOS say (default) via [voice.conversation]
 
 Examples:
   my-agent transcribe question.wav

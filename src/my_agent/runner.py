@@ -15,6 +15,9 @@ from my_agent.config import AppConfig, DisplayConfig
 from my_agent.display import TurnStreamPrinter
 from my_agent.memory.chroma_store import ChromaConversationStore
 from my_agent.messages import extract_messages, latest_assistant_text, message_text
+from my_agent.voice.extract import VoiceTagStreamFilter
+from my_agent.voice.queue import VoiceQueue
+from my_agent.voice.session import activate_voice_queue, deactivate_voice_queue
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,7 @@ def run_turn(
     turn_index: int,
     stream: bool = True,
     display: DisplayConfig | None = None,
+    voice_queue: VoiceQueue | None = None,
 ) -> str:
     graph_config = {"configurable": {"thread_id": thread_id}}
     stream_input: dict[str, Any] | Command = {
@@ -49,49 +53,65 @@ def run_turn(
     printed_tokens = False
     messages_before = _message_count(agent, graph_config)
     active_display = display or config.display
+    voice_filter: VoiceTagStreamFilter | None = None
+    if voice_queue is not None and config.voice_conversation.strip_voice_tags_from_terminal:
+        voice_filter = VoiceTagStreamFilter(
+            voice_queue,
+            max_chars=config.voice_conversation.max_speak_chars,
+            strip_from_terminal=True,
+        )
 
-    while True:
-        if stream:
-            reply = _stream_until_pause(
-                agent,
-                stream_input,
-                graph_config,
-                display=active_display,
-                printed_tokens=printed_tokens,
-            )
-            printed_tokens = True
-            if reply.interrupted:
-                stream_input = _prompt_and_build_resume(reply.interrupt_value)
+    session_token = activate_voice_queue(voice_queue)
+    try:
+        while True:
+            if stream:
+                reply = _stream_until_pause(
+                    agent,
+                    stream_input,
+                    graph_config,
+                    display=active_display,
+                    printed_tokens=printed_tokens,
+                    voice_filter=voice_filter,
+                )
+                printed_tokens = True
+                if reply.interrupted:
+                    stream_input = _prompt_and_build_resume(reply.interrupt_value)
+                    continue
+
+                final_messages = _new_messages(
+                    extract_messages(reply.output),
+                    messages_before,
+                )
+                if config.memory.index_on_each_turn and final_messages:
+                    chroma_store.index_messages(
+                        thread_id,
+                        final_messages,
+                        turn_index=turn_index,
+                    )
+                return latest_assistant_text(extract_messages(reply.output))
+
+            result = agent.invoke(stream_input, config=graph_config, version="v2")
+            if getattr(result, "interrupts", None):
+                interrupt_value = result.interrupts[0].value
+                stream_input = _prompt_and_build_resume(interrupt_value)
                 continue
 
-            final_messages = _new_messages(
-                extract_messages(reply.output),
-                messages_before,
-            )
+            state = result.value if hasattr(result, "value") else result
+            all_messages = extract_messages(state)
+            final_messages = _new_messages(all_messages, messages_before)
             if config.memory.index_on_each_turn and final_messages:
                 chroma_store.index_messages(
                     thread_id,
                     final_messages,
                     turn_index=turn_index,
                 )
-            return latest_assistant_text(extract_messages(reply.output))
-
-        result = agent.invoke(stream_input, config=graph_config, version="v2")
-        if getattr(result, "interrupts", None):
-            interrupt_value = result.interrupts[0].value
-            stream_input = _prompt_and_build_resume(interrupt_value)
-            continue
-
-        state = result.value if hasattr(result, "value") else result
-        all_messages = extract_messages(state)
-        final_messages = _new_messages(all_messages, messages_before)
-        if config.memory.index_on_each_turn and final_messages:
-            chroma_store.index_messages(
-                thread_id,
-                final_messages,
-                turn_index=turn_index,
-            )
-        return latest_assistant_text(all_messages)
+            return latest_assistant_text(all_messages)
+    finally:
+        deactivate_voice_queue(session_token)
+        if voice_filter is not None:
+            voice_filter.flush()
+        if voice_queue is not None:
+            voice_queue.wait_idle()
 
 
 class _StreamResult:
@@ -108,8 +128,9 @@ def _stream_until_pause(
     *,
     display: DisplayConfig,
     printed_tokens: bool,
+    voice_filter: VoiceTagStreamFilter | None = None,
 ) -> _StreamResult:
-    printer = TurnStreamPrinter(display)
+    printer = TurnStreamPrinter(display, voice_filter=voice_filter)
     event_stream = agent.stream_events(stream_input, config=graph_config, version="v3")
     printer.consume_run(event_stream)
 

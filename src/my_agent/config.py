@@ -84,6 +84,16 @@ class VoiceConfig:
 
 
 @dataclass(frozen=True)
+class VoiceConversationConfig:
+    enabled: bool = False
+    tts_backend: str = "macos"
+    tts_voice: str = ""
+    max_speak_chars: int = 500
+    strip_voice_tags_from_terminal: bool = True
+    show_speaker_notes: bool = True
+
+
+@dataclass(frozen=True)
 class CheckpointConfig:
     backend: str = "sqlite"
     sqlite_path: str = "checkpoints.sqlite"
@@ -123,6 +133,7 @@ class AppConfig:
     summarization: SummarizationConfig
     tavily: TavilyConfig
     voice: VoiceConfig
+    voice_conversation: VoiceConversationConfig
     display: DisplayConfig
     checkpoint: CheckpointConfig
     store: StoreConfig
@@ -309,6 +320,20 @@ def _interpolate_env_value(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _interpolate_env_value(item) for key, item in value.items()}
     return value
+
+
+def _load_voice_conversation_config(raw: dict[str, Any]) -> VoiceConversationConfig:
+    """Parse ``[voice.conversation]`` settings."""
+    return VoiceConversationConfig(
+        enabled=bool(raw.get("enabled", False)),
+        tts_backend=str(raw.get("tts_backend", "macos")),
+        tts_voice=str(raw.get("tts_voice", "")),
+        max_speak_chars=int(raw.get("max_speak_chars", 500)),
+        strip_voice_tags_from_terminal=bool(
+            raw.get("strip_voice_tags_from_terminal", True)
+        ),
+        show_speaker_notes=bool(raw.get("show_speaker_notes", True)),
+    )
 
 
 def _parse_mcp_server(raw: dict[str, Any]) -> MCPServerConfig:
@@ -533,6 +558,9 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
                 voice_section.get("max_duration_seconds", 120.0)
             ),
             confirm_before_send=bool(voice_section.get("confirm_before_send", True)),
+        ),
+        voice_conversation=_load_voice_conversation_config(
+            voice_section.get("conversation", {})
         ),
         display=DisplayConfig(
             show_reasoning=bool(display_section.get("show_reasoning", True)),
