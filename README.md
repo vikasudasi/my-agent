@@ -1,20 +1,46 @@
 # my-agent
 
-A local macOS deep agent built on [LangChain Deep Agents](https://github.com/langchain-ai/deepagents) and [OpenRouter](https://openrouter.ai/). It runs shell commands, reads and writes files, searches the web, remembers conversations across sessions, and integrates with MCP (Model Context Protocol) servers for pluggable tools and capabilities.
+**Your personal macOS coding agent — local, persistent, and built to work the way you do.**
+
+my-agent is a terminal-native deep agent powered by [LangChain Deep Agents](https://github.com/langchain-ai/deepagents) and [OpenRouter](https://openrouter.ai/). It runs shell commands, reads and writes files, searches the web, remembers conversations across sessions, and connects to [MCP](https://modelcontextprotocol.io) servers for pluggable tools — all from a fast, streaming REPL.
+
+Run it from any project directory. Your personal defaults travel with you; project-specific rules and skills load automatically when you're in a repo.
+
+---
+
+## At a glance
+
+| Capability | What it means for you |
+|------------|----------------------|
+| **Interactive chat** | Streaming REPL with resumable threads and rich tool visibility |
+| **One-shot tasks** | `my-agent run "…"` for scripts, automation, and quick prompts |
+| **Persistent memory** | SQLite checkpoints, durable `/memories/` notes, and semantic search across past chats |
+| **Voice input** | Push-to-talk in chat (`/mic`) or transcribe audio files via OpenRouter STT |
+| **MCP integration** | Plug in local and remote MCP servers (stdio, HTTP, SSE, WebSocket) |
+| **Agent skills** | Markdown workflows the agent loads on demand — project or user scoped |
+| **Subagent delegation** | Spawn isolated subagents for complex tasks with live streaming progress |
+| **Human-in-the-loop** | Optional approval before shell commands and file writes (on by default) |
+| **Portable by design** | Global defaults in `~/.my-agent/` + per-project overrides in `./` |
+
+---
 
 ## Features
 
-- **Interactive chat** — REPL-style terminal chat with streaming output
-- **One-shot tasks** — run a single prompt and exit
+- **Interactive chat** — REPL-style terminal chat with streaming output, thread resume, and Ctrl+C redirect
+- **One-shot tasks** — run a single prompt and exit; optional `--audio` for voice-driven tasks
 - **Persistent threads** — chat history survives restarts via SQLite checkpoints
+- **Context summarization** — automatically compresses long conversations to stay within context limits
 - **Semantic memory** — ChromaDB indexes conversations for cross-thread search
-- **Agent skills** — markdown workflows the agent loads on demand (`skills/`)
-- **MCP server integration** — connect local and remote MCP servers for tools and resources (stdio, SSE, Streamable HTTP, WebSocket)
-- **Subagent delegation** — spawn isolated subagents for complex tasks with live streaming
-- **Web search** — Tavily integration for live information (optional)
-- **Human-in-the-loop** — optional approval before shell commands and file writes
+- **Durable notes** — agent-written files under `/memories/` persist preferences, contacts, and facts
+- **Agent skills** — repeatable markdown workflows in `skills/` and `~/.my-agent/skills/`
+- **MCP server integration** — connect local and remote MCP servers for tools and resources
+- **Subagent delegation** — spawn isolated subagents for complex multi-step work
+- **Web search & fetch** — Tavily integration and page fetching for live information (optional)
+- **Voice input** — push-to-talk in chat or standalone transcription via OpenRouter
+- **Human-in-the-loop** — optional approval before destructive shell and file actions
 - **Verbose mode** — show reasoning, tool calls, tool results, and loaded skills
-- **Portable by design** — run from any directory; global defaults + local overrides
+
+---
 
 ## Requirements
 
@@ -23,6 +49,9 @@ A local macOS deep agent built on [LangChain Deep Agents](https://github.com/lan
 - [uv](https://docs.astral.sh/uv/) or pip
 - [OpenRouter](https://openrouter.ai/) API key
 - Tavily API key (optional, for web search)
+- Voice extras (optional): `pip install 'my-agent[voice]'` for push-to-talk capture
+
+---
 
 ## Quick start
 
@@ -34,6 +63,9 @@ cd my-agent
 uv venv
 uv pip install -e .
 
+# Optional: voice input (push-to-talk in chat)
+uv pip install -e '.[voice]'
+
 # Configure
 cp config.toml.example config.toml
 cp .env.example .env
@@ -43,150 +75,193 @@ cp .env.example .env
 my-agent chat
 ```
 
+**Try it:**
+
+```bash
+my-agent chat --continue          # pick up your last conversation
+my-agent chat --voice             # enable /mic push-to-talk
+my-agent run "Summarize this repo"  # one-shot task
+my-agent transcribe recording.wav   # speech-to-text only
+```
+
+---
+
 ## Global installation
 
 Install once, use from anywhere:
 
 ```bash
-# Activate the venv (adjust path as needed)
-# and add the agent to your PATH
+# After uv pip install -e ., the my-agent entrypoint is on your PATH
 echo 'export PATH="$HOME/my-agent/.venv/bin:$PATH"' >> ~/.zshrc
-
-# Or symlink as a script entry point:
-# uv pip install -e .   (already done above creates the my-agent entrypoint)
 ```
 
-Once installed globally, `my-agent` resolves files in this order:
+Once installed, `my-agent` resolves files in this order:
 
 | Resource | Resolution | Detail |
 |----------|------------|--------|
-| **`config.toml`** | `--config` CLI > `./config.toml` > `~/.my-agent/config.toml` | First-found wins. |
-| **`.env`** | `~/.my-agent/.env` then `./.env` (cwd overrides home) | Both loaded; cwd values override. |
-| **`AGENTS.md` (memory)** | `~/.my-agent/AGENTS.md` **and** `./AGENTS.md` | Both injected into system prompt when they exist. |
-| **User skills** | `~/.my-agent/skills/{name}/SKILL.md` | Always loaded. |
-| **Project skills** | `./skills/{name}/SKILL.md` | Loaded when the directory exists. |
-| **Checkpoints** | `~/.my-agent/checkpoints.sqlite` (or `[checkpoint].sqlite_path`) | Always under `agent_state_dir` (`~/.my-agent/` by default). |
-| **`/memories/` store** | `~/.my-agent/store.sqlite` (or `[store].sqlite_path`) | Always under `agent_state_dir`. |
-| **Chroma DB** | `~/.my-agent/chroma/` (or `[paths].chroma_dir`) | Always under `agent_state_dir`. |
+| **`config.toml`** | `--config` CLI → `./config.toml` → `~/.my-agent/config.toml` | First-found wins |
+| **`.env`** | `~/.my-agent/.env` then `./.env` | Cwd values override home |
+| **`AGENTS.md`** | `~/.my-agent/AGENTS.md` **and** `./AGENTS.md` | Both injected into system prompt |
+| **User skills** | `~/.my-agent/skills/{name}/SKILL.md` | Always available |
+| **Project skills** | `./skills/{name}/SKILL.md` | Loaded when the directory exists |
+| **Checkpoints** | `~/.my-agent/checkpoints.sqlite` | Thread persistence |
+| **`/memories/` store** | `~/.my-agent/store.sqlite` | Durable agent-written notes |
+| **Chroma DB** | `~/.my-agent/chroma/` | Semantic conversation index |
 
-This means you can run `my-agent chat` from any project directory and it will automatically pick up project-local config while sharing the same global checkpoints, memories, and skills across all your projects.
+Run `my-agent chat` from any project directory — it picks up local `config.toml`, `AGENTS.md`, and `skills/` while sharing the same global checkpoints, memories, and user skills.
+
+---
 
 ## Configuration
 
-Copy `config.toml.example` to any of these locations:
+Copy `config.toml.example` to either location:
 
 ```bash
 # Personal defaults (used from any directory)
 cp config.toml.example ~/.my-agent/config.toml
 
-# Or project-specific (overrides personal defaults when in this directory)
+# Project-specific (overrides personal defaults when in this directory)
 cp config.toml.example /path/to/project/config.toml
 ```
 
-Secrets go in `.env` — loaded from `~/.my-agent/.env` then overridden by `./.env`:
+Secrets go in `.env` — loaded from `~/.my-agent/.env`, then overridden by `./.env`:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `OPENROUTER_API_KEY` | Yes | API key for the LLM via OpenRouter |
+| `OPENROUTER_API_KEY` | Yes | API key for the LLM and speech-to-text via OpenRouter |
 | `TAVILY_API_KEY` | No | Enables live web search |
 
-Key `config.toml` sections:
+### Config sections
 
 | Section | Purpose |
 |---------|---------|
 | `[llm]` | Model slug (e.g. `anthropic/claude-sonnet-4-6`) and temperature |
 | `[agent]` | Home directory root (`~`) and optional system prompt override |
 | `[security]` | `require_approval` — prompt before destructive shell/file actions |
+| `[paths]` | Agent state directory, skills paths, and Chroma location |
 | `[checkpoint]` | Thread persistence (`sqlite` or `memory`), retention limits |
 | `[store]` | `/memories/` persistence (`sqlite` or `memory`) |
 | `[memory]` | Chroma collection and embedding model |
 | `[tavily]` | Web search defaults |
+| `[voice]` | Speech-to-text model, language hint, and capture settings |
+| `[summarization]` | Auto-summarize long conversations to manage context window |
 | `[display]` | Streaming verbosity defaults |
 | `[mcp]` | MCP server integration (see [MCP Configuration](#mcp-configuration)) |
 
-Persistent data lives under `~/.my-agent/` by default (checkpoints, Chroma, memories store, user skills), making it safe to run from any directory.
+Persistent data lives under `~/.my-agent/` by default.
 
-## MCP Configuration
+### Context summarization
 
-my-agent supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) for connecting to external tools and resources. Configure MCP servers in `config.toml` under the `[mcp]` section.
-
-### Quick Start
+Long conversations are automatically summarized when non-system messages exceed `max_messages`. Older turns are replaced with a concise summary, keeping the most recent `keep_last` messages intact:
 
 ```toml
-# Enable/disable MCP integration (default: true)
+[summarization]
+enabled = true
+max_messages = 30
+keep_last = 10
+# model = ""   # optional cheaper model; defaults to [llm].model
+```
+
+Set `enabled = false` to disable.
+
+---
+
+## Voice input
+
+Speech-to-text runs through OpenRouter's transcription API (same `OPENROUTER_API_KEY`).
+
+**Interactive chat** — enable with `--voice` or `[voice].enabled = true`:
+
+```bash
+my-agent chat --voice
+# In the REPL, type /mic then hold Space to record (requires my-agent[voice])
+```
+
+**One-shot with audio** — transcribe a file and run it as a task:
+
+```bash
+my-agent run --audio question.wav
+my-agent run "Also check the logs" --audio followup.wav
+```
+
+**Transcribe only** — no agent invocation:
+
+```bash
+my-agent transcribe recording.wav
+```
+
+Supported formats: wav, mp3, flac, m4a, ogg, webm, aac.
+
+```toml
+[voice]
+enabled = false
+model = "openai/whisper-large-v3"
+language = ""              # ISO-639-1 hint, e.g. "en"; empty = auto-detect
+max_duration_seconds = 120
+confirm_before_send = true
+```
+
+---
+
+## MCP configuration
+
+my-agent supports the [Model Context Protocol](https://modelcontextprotocol.io) for connecting external tools and resources. Configure servers in `config.toml` under `[mcp]`.
+
+### Quick start
+
+```toml
 [mcp]
 
-# ---- Stdio (local subprocess) ----
-# Run a local MCP server via command-line
+# Stdio (local subprocess)
 [[mcp.servers]]
 name = "filesystem"
 transport = "stdio"
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
 
-# ---- HTTP / Streamable HTTP (remote) ----
-# Connect to a remote MCP server using the Streamable HTTP transport
+# Streamable HTTP (remote)
 [[mcp.servers]]
 name = "weather"
 transport = "http"
 url = "http://localhost:8000/mcp"
 headers = { Authorization = "Bearer ${MCP_WEATHER_TOKEN}" }
 
-# ---- SSE (remote, Server-Sent Events) ----
+# SSE (remote)
 [[mcp.servers]]
 name = "sse-server"
 transport = "sse"
 url = "http://localhost:8000/mcp/sse"
-headers = { Authorization = "Bearer ${MCP_SSE_TOKEN}" }
 
-# ---- WebSocket (remote) ----
+# WebSocket (remote)
 [[mcp.servers]]
 name = "ws-server"
 transport = "websocket"
 url = "ws://localhost:8000/mcp"
 ```
 
-### Transport Reference
+### Transport reference
 
 | Transport | `transport` value | Use case |
 |-----------|-------------------|----------|
 | **Stdio** | `"stdio"` | Local subprocess (e.g. `npx`-based MCP servers) |
-| **Streamable HTTP** | `"http"`, `"streamable_http"`, or `"streamable-http"` | Remote server using the newer Streamable HTTP MCP transport |
-| **SSE** | `"sse"` | Remote server using the classic Server-Sent Events MCP transport |
-| **WebSocket** | `"websocket"` | Remote server using WebSocket transport |
+| **Streamable HTTP** | `"http"`, `"streamable_http"`, `"streamable-http"` | Remote server using Streamable HTTP |
+| **SSE** | `"sse"` | Remote server using Server-Sent Events |
+| **WebSocket** | `"websocket"` | Remote server using WebSocket |
 
-### Per-Server Fields
+### Per-server fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Unique identifier for the server |
-| `transport` | string | yes | One of `stdio`, `sse`, `http`, `streamable_http`, `websocket` |
-| `command` | string | required for `stdio` | The executable to run |
+| `name` | string | yes | Unique identifier |
+| `transport` | string | yes | `stdio`, `sse`, `http`, `streamable_http`, or `websocket` |
+| `command` | string | stdio only | Executable to run |
 | `args` | string[] | optional | Command-line arguments |
-| `url` | string | required for `sse`, `http`, `websocket` | Server URL |
-| `headers` | table | optional | HTTP headers (supports `${ENV_VAR}` interpolation) |
+| `url` | string | remote only | Server URL |
+| `headers` | table | optional | HTTP headers (`${ENV_VAR}` interpolation supported) |
 
-> **Environment variable interpolation**: Values in `headers` can reference environment variables with the `${VAR_NAME}` syntax (e.g. `Bearer ${MCP_WEATHER_TOKEN}`). These are resolved at runtime.
+MCP servers from `~/.my-agent/config.toml` and `./config.toml` are **merged**; project-level definitions override home-level ones with the same `name`. Failed servers are skipped with a warning — the agent continues with whatever tools loaded successfully.
 
-### Configuration Merging
-
-MCP servers from `~/.my-agent/config.toml` and `./config.toml` are **merged**. If a server with the same `name` exists in both, the project-level (`./config.toml`) definition overrides the home-level one.
-
-### Error Handling
-
-If an MCP server fails to connect or load its tools, my-agent logs a warning and continues without it. The agent will still work with whatever tools could be loaded from other servers.
-
-### MCP Architecture
-
-MCP servers are loaded at agent startup via `MultiServerMCPClient` from `langchain-mcp-adapters`. The flow:
-
-1. Config is read from `config.toml` (home + project merged)
-2. Each server definition is validated and converted to a connection dict
-3. `MultiServerMCPClient` connects to all servers and collects their tools
-4. The combined tool list is injected into the agent's toolset
-5. Failed servers are skipped with a warning — the agent continues working
-
-This happens transparently — the agent can call MCP tools alongside built-in tools without any distinction.
+---
 
 ## CLI reference
 
@@ -194,7 +269,8 @@ This happens transparently — the agent can call MCP tools alongside built-in t
 my-agent
 ├── chat                         Interactive REPL
 ├── run <task>                   One-shot task
-├── help [topic]                 Command reference (this document in the terminal)
+├── transcribe <audio>           Transcribe an audio file (OpenRouter STT)
+├── help [topic]                 Command reference in the terminal
 ├── threads
 │   ├── list          List saved chat threads
 │   ├── prune         Delete old threads by retention limits
@@ -204,164 +280,88 @@ my-agent
     └── read <path>   Print a /memories/ file
 ```
 
-Global options are available on every command:
+Global options (most commands):
 
 | Option | Description |
 |--------|-------------|
-| `--config FILE` | Path to `config.toml` (default: `./config.toml`, fallback `~/.my-agent/config.toml`) |
-| `--help` | Show Typer help for one command |
-| `my-agent help [topic]` | Full command reference (e.g. `help chat`, `help threads prune`) |
-
-### `my-agent help`
-
-Print documented command reference in the terminal. Without a topic, shows the full overview.
-
-| Argument | Description |
-|----------|-------------|
-| `TOPIC` | Optional: `chat`, `run`, `threads`, `threads list`, `threads prune`, `threads delete`, `memories`, `memories list`, `memories read` |
-
-```bash
-my-agent help
-my-agent help chat
-my-agent help threads prune
-my-agent help memories
-```
+| `--config FILE` | Path to `config.toml` |
+| `--help` | Typer help for a command |
+| `my-agent help [topic]` | Full reference (e.g. `help chat`, `help threads prune`) |
 
 ### `my-agent chat`
 
-Interactive REPL. Each session gets a `thread_id` printed at startup. Type `exit` or `quit` to leave.
+Interactive REPL. Each session prints a `thread_id`. Type `exit` or `quit` to leave.
 
 | Option | Description |
 |--------|-------------|
 | `--thread-id TEXT` | Resume a specific saved thread |
 | `--continue` | Resume the most recently updated thread |
+| `--voice` | Enable voice input (`/mic` for push-to-talk) |
 | `--verbose` | Show reasoning, tool calls, tool results, and loaded skills |
 | `--quiet` | Hide reasoning, tool calls, tool results, and loaded skills |
-
-`--continue` and `--thread-id` cannot be used together. When resuming a thread with history, the banner shows message count (e.g. `Resuming thread <uuid> (12 messages)`).
 
 ```bash
 my-agent chat
 my-agent chat --continue
-my-agent chat --thread-id 0353da51-f909-4144-b95a-52db1ea8986f
-my-agent chat --verbose
-my-agent chat --quiet
-my-agent chat --config /path/to/config.toml
+my-agent chat --voice
+my-agent chat --thread-id <uuid>
 ```
 
 ### `my-agent run`
 
-Run a single task and exit. Useful for scripts and one-off prompts.
+Run a single task and exit.
 
 | Option | Description |
 |--------|-------------|
-| `--thread-id TEXT` | Attach to an existing thread (default: new UUID) |
+| `TASK` | One-shot prompt (optional with `--audio`) |
+| `--thread-id TEXT` | Attach to an existing thread |
 | `--continue` | Use the most recently updated thread |
-| `--verbose` | Show reasoning, tool calls, tool results, and loaded skills |
-| `--quiet` | Hide reasoning, tool calls, tool results, and loaded skills |
+| `--audio FILE` | Transcribe audio and use as the task |
+| `--verbose` / `--quiet` | Display verbosity |
 
 ```bash
 my-agent run "List the five largest files in my Downloads folder"
+my-agent run --audio question.wav
 my-agent run --continue "Now sort them by date"
-my-agent run --verbose "What were the biggest AI news stories this week?"
 ```
 
-### `my-agent threads list`
+### `my-agent transcribe`
 
-List chat threads saved in the checkpoint database (newest first). Shows `thread_id`, last updated time, message count, and first user message snippet.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--limit N` | `20` | Maximum threads to show |
+Transcribe an audio file via OpenRouter speech-to-text (no agent invocation).
 
 ```bash
-my-agent threads list
-my-agent threads list --limit 10
+my-agent transcribe recording.wav
 ```
 
-Use the `thread_id` from this output with `my-agent chat --thread-id <id>` to resume a conversation.
-
-### `my-agent threads prune`
-
-Delete old threads using count and/or age limits from config (or CLI overrides). The most recently updated thread is protected by default (the one `chat --continue` would use).
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--keep N` | `[checkpoint].max_threads` | Keep N newest threads (`0` = no count limit) |
-| `--max-age-days N` | `[checkpoint].max_thread_age_days` | Delete threads older than N days (`0` = disabled) |
-| `--dry-run` | off | Preview deletions without applying |
-| `--no-protect-latest` | off | Allow deleting the newest thread |
-| `--no-vacuum` | off | Skip SQLite VACUUM after prune |
-
-Config (`config.toml`):
-
-```toml
-[checkpoint]
-max_threads = 50          # 0 = unlimited
-max_thread_age_days = 0   # 0 = disabled; e.g. 90 to drop stale threads
-```
+### `my-agent threads`
 
 ```bash
-my-agent threads prune --dry-run
-my-agent threads prune
-my-agent threads prune --keep 20
-my-agent threads prune --max-age-days 90
+my-agent threads list [--limit N]
+my-agent threads prune [--dry-run] [--keep N] [--max-age-days N]
+my-agent threads delete <thread-id> [--yes]
 ```
 
-### `my-agent threads delete`
-
-Delete a single thread and all its checkpoint data.
-
-| Option | Description |
-|--------|-------------|
-| `THREAD_ID` | Thread to delete (from `threads list`) |
-| `--yes` / `-y` | Skip confirmation |
+### `my-agent memories`
 
 ```bash
-my-agent threads delete 0353da51-f909-4144-b95a-52db1ea8986f
-my-agent threads delete 0353da51-f909-4144-b95a-52db1ea8986f --yes
-```
-
-### `my-agent memories list`
-
-List files the agent has written under `/memories/` (persisted in `store.sqlite`). Shows path, updated time, size, and a content snippet.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--limit N` | `50` | Maximum files to show |
-
-```bash
-my-agent memories list
-my-agent memories list --limit 20
-```
-
-### `my-agent memories read`
-
-Print the full contents of a `/memories/` file.
-
-| Argument | Description |
-|----------|-------------|
-| `PATH` | Virtual path, e.g. `/memories/user.md` |
-
-```bash
+my-agent memories list [--limit N]
 my-agent memories read /memories/user.md
-my-agent memories read /memories/preferences.md
 ```
 
 ### Common workflows
 
 ```bash
-# Start fresh, note the thread_id printed at startup
+# Start fresh — note the thread_id printed at startup
 my-agent chat
 
 # Pick up where you left off
 my-agent chat --continue
 
-# Find an older thread to resume
+# Find and resume an older thread
 my-agent threads list
-my-agent chat --thread-id <uuid-from-list>
+my-agent chat --thread-id <uuid>
 
-# Inspect what the agent remembers about you
+# Inspect what the agent remembers
 my-agent memories list
 my-agent memories read /memories/user.md
 
@@ -369,90 +369,158 @@ my-agent memories read /memories/user.md
 my-agent threads prune --dry-run
 my-agent threads prune
 
-# Use from a project directory with project-specific config
+# Use project-specific config and skills
 cd ~/projects/my-app
-my-agent chat   # picks up ./config.toml if it exists, or falls back to ~/.my-agent/config.toml
+my-agent chat
 ```
+
+---
 
 ## Memory
 
-The agent uses several memory layers:
+The agent uses layered memory — each layer serves a different purpose:
+
+```mermaid
+flowchart TB
+    subgraph session [Current session]
+        CP[Thread checkpoint<br/>exact replay]
+    end
+    subgraph durable [Durable storage]
+        MEM["/memories/ store<br/>preferences & facts"]
+        CHROMA[Chroma<br/>semantic search]
+    end
+    subgraph instructions [Instructions]
+        AGH[AGENTS.md home]
+        AGP[AGENTS.md project]
+        SK[Skills]
+    end
+    CP --> MEM
+    CP --> CHROMA
+    AGH --> CP
+    AGP --> CP
+    SK --> CP
+```
 
 | Layer | Storage | Purpose |
 |-------|---------|---------|
 | **Thread checkpoint** | `~/.my-agent/checkpoints.sqlite` | Exact replay of the current chat (`thread_id`) |
-| **`/memories/` store** | `~/.my-agent/store.sqlite` | Durable agent-written notes (preferences, contacts, facts) |
+| **`/memories/` store** | `~/.my-agent/store.sqlite` | Durable agent-written notes |
 | **Chroma** | `~/.my-agent/chroma` | Semantic search across past conversations |
-| **AGENTS.md (home)** | `~/.my-agent/AGENTS.md` | Personal operating principles (loaded first into system prompt) |
-| **AGENTS.md (project)** | `./AGENTS.md` | Project-specific rules (loaded second into system prompt) |
+| **AGENTS.md (home)** | `~/.my-agent/AGENTS.md` | Personal operating principles |
+| **AGENTS.md (project)** | `./AGENTS.md` | Project-specific rules |
 | **Skills** | `skills/` and `~/.my-agent/skills/` | Repeatable workflows loaded when relevant |
 
-Within a thread, the agent remembers prior turns automatically. Personal facts should be saved under `/memories/` (persisted across restarts). Across threads, it can call `search_past_conversations` and related tools to find older context.
+Within a thread, prior turns are remembered automatically. Personal facts belong in `/memories/`. Across threads, the agent can call `search_past_conversations` and related tools to find older context.
 
-When both `~/.my-agent/AGENTS.md` and `./AGENTS.md` exist, both are injected into the system prompt (home first, project second), so project rules can supplement personal rules.
+---
 
 ## Skills
 
 Skills are markdown files with YAML frontmatter that teach the agent repeatable workflows.
 
-| Scope | Filesystem path | Virtual path (agent tools) |
-|-------|-----------------|----------------------------|
+| Scope | Filesystem path | Virtual path |
+|-------|-----------------|--------------|
 | Project | `./skills/{name}/SKILL.md` | `/skills/project/{name}/` |
 | User | `~/.my-agent/skills/{name}/SKILL.md` | `/skills/{name}/` |
 
-Bundled skills:
+Bundled project skills:
 
-- `skills/tavily-web-search/` — when and how to search the live web
-- `skills/creating-skills/` — how the agent authors new skills
+| Skill | Purpose |
+|-------|---------|
+| `tavily-web-search` | When and how to search the live web |
+| `webpage-fetch` | Fetching and reading web pages |
+| `creating-skills` | How the agent authors new skills |
+| `mcp-config` | MCP server configuration guidance |
+| `task-management` | Structured task planning and tracking |
+| `caveman` | Git workflow orchestration |
+| `caveman-commit` | Commit message conventions |
+| `caveman-review` | Code review workflow |
+| `caveman-help` | Caveman skill reference |
+| `semble-search` | Semble platform search |
 
 See [AGENTS.md](AGENTS.md) for the agent's operating principles.
 
-## Virtual paths in the agent
+---
 
-The agent has access to a virtual filesystem. Paths starting with `/` are routed to different backends:
+## Virtual paths
+
+The agent uses a virtual filesystem. Paths starting with `/` route to different backends:
 
 | Virtual path | Maps to | Description |
 |--------------|---------|-------------|
-| `/memories/` | `~/.my-agent/store.sqlite` (SqliteStore) | Durable agent-written notes |
-| `/cwd/` | Current working directory (filesystem) | Read/write project files |
+| `/memories/` | `store.sqlite` | Durable agent-written notes |
+| `/cwd/` | Current working directory | Read/write project files |
 | `/skills/` | `~/.my-agent/skills/` | User-scoped skills |
 | `/skills/project/` | `./skills/` | Project-scoped skills |
-| `/.agent/` | Agent state (ephemeral per thread) | Internal agent files |
+| `/.agent/` | Agent state (per thread) | Internal agent files |
 
-The `/cwd/` route is especially useful when running from a project directory — you can ask the agent to read, edit, or create files relative to the current directory using paths like `/cwd/src/main.py`.
+Example: ask the agent to edit `/cwd/src/main.py` when running from a project directory.
+
+---
 
 ## Project structure
 
 ```
 my-agent/
-├── AGENTS.md              # Agent instructions (injected into system prompt)
-├── config.toml.example    # Configuration template (includes MCP examples)
-├── skills/                # Project-scoped agent skills
+├── AGENTS.md                  # Agent instructions (injected into system prompt)
+├── config.toml.example        # Configuration template (includes MCP examples)
+├── skills/                    # Project-scoped agent skills
 ├── src/my_agent/
-│   ├── agent.py           # Deep agent setup, MCP tool injection
-│   ├── checkpoint.py      # Thread persistence
-│   ├── store.py           # /memories/ persistence
-│   ├── cli.py             # Typer CLI
-│   ├── config.py          # Config loading (MCPServerConfig, MCPConfig)
-│   ├── display.py         # Streaming output
-│   ├── runner.py          # Turn execution
-│   ├── help_text.py       # CLI help text
-│   ├── memory/            # Chroma conversation store
+│   ├── agent.py               # Deep agent setup, MCP tool injection
+│   ├── checkpoint.py          # Thread persistence
+│   ├── store.py               # /memories/ persistence
+│   ├── cli.py                 # Typer CLI
+│   ├── config.py              # Config loading
+│   ├── display.py             # Streaming output
+│   ├── runner.py              # Turn execution
+│   ├── help_text.py           # CLI help text
+│   ├── messages.py            # Message utilities
+│   ├── terminal_input.py    # REPL input handling
+│   ├── memory/                # Chroma conversation store
+│   ├── middleware/            # Summarization and other middleware
+│   ├── voice/                 # Speech-to-text capture and transcription
 │   └── tools/
-│       ├── mcp_tools.py   # MCP server tool loading via MultiServerMCPClient
-│       ├── fetch_page.py  # Web fetch tool
-│       ├── delegate_task.py # Subagent delegation
-│       ├── tavily_search.py # Web search tool
-│       └── conversation_memory.py # Past conversation search
+│       ├── mcp_tools.py       # MCP server tool loading
+│       ├── delegate_task.py   # Subagent delegation
+│       ├── fetch_page.py      # Web page fetch
+│       ├── tavily_search.py   # Web search
+│       └── conversation_memory.py
+├── tests/
 └── pyproject.toml
 ```
 
-## Security notes
+---
+
+## Development
+
+```bash
+# Install with test dependencies
+uv pip install -e '.[test]'
+
+# Run the test suite
+pytest tests/
+
+# Run with coverage
+pytest tests/ --cov=my_agent
+```
+
+Optional dependency groups:
+
+| Extra | Install | Purpose |
+|-------|---------|---------|
+| `voice` | `pip install 'my-agent[voice]'` | Push-to-talk audio capture in chat |
+| `test` | `pip install 'my-agent[test]'` | pytest and coverage |
+
+---
+
+## Security
 
 - The agent can run shell commands and modify files within its configured root directory.
 - With `require_approval = true` (default), destructive actions pause for your approval.
-- Checkpoints and Chroma may contain tool output from your machine — they live locally in `~/.my-agent/` and are not committed to git.
+- Checkpoints and Chroma may contain tool output from your machine — stored locally in `~/.my-agent/`, never committed to git.
 - Never commit `.env` or `config.toml` with real API keys.
+
+---
 
 ## License
 
