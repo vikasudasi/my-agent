@@ -148,7 +148,7 @@ def _create_agent(config: AppConfig, chroma_store: ChromaConversationStore):
     system_prompt = (
         config.agent.system_prompt
         + "\n\n"
-        + config.build_path_mappings()
+        + config.build_backend_awareness()
     )
 
     return create_deep_agent(

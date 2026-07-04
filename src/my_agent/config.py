@@ -133,20 +133,145 @@ class AppConfig:
     config_dir: Path  # directory of the loaded config.toml
     has_cwd_skills: bool  # whether ./skills exists
 
-    def build_path_mappings(self) -> str:
-        """Generate the host path mappings section for the system prompt.
+    def build_backend_awareness(self) -> str:
+        """Generate backend routing rules and examples for the system prompt.
 
-        These tell the agent how to convert virtual filesystem paths back
-        to real filesystem paths when running shell commands.
+        Gives the agent self-awareness about virtual paths, backend tools,
+        and how to translate between file tools and shell commands.
         """
-        return f"""Host path mappings:
-- `/cwd/` -> `{self.project_root}/`
-- `/skills/` -> `{self.paths.skills_user_dir}/`
-{f'- `/skills/project/` -> `{self.paths.skills_project_dir}/`' if self.has_cwd_skills else ''}
-- default (execute cwd) -> `{self.project_root}/`
+        project_root = self.project_root
+        skills_user_dir = self.paths.skills_user_dir
+        project_skills_mapping = ""
+        project_skills_row = ""
+        project_skill_virtual = "/skills/project/{name}/SKILL.md"
+        project_skill_example = (
+            f'`read_file("{project_skill_virtual.replace("{name}", "tavily-web-search")}")`'
+        )
+        project_skill_shell = (
+            f'`execute("cat {self.paths.skills_project_dir}/tavily-web-search/SKILL.md")`'
+        )
+        activate_skill_step = '2. `read_file("/skills/project/{name}/SKILL.md")`'
 
-When you need to run shell commands on files, use the real paths above.
-For file tools (read_file, write_file, edit_file, ls, glob, grep), use virtual paths (/cwd/...)."""
+        if self.has_cwd_skills:
+            project_skills_mapping = (
+                f"- `/skills/project/` -> `{self.paths.skills_project_dir}/`\n"
+            )
+            project_skills_row = (
+                f"| `/skills/project/` | Project-scoped skills "
+                f"(`{self.paths.skills_project_dir}/`) | On disk | "
+                f'`/skills/project/tavily-web-search/SKILL.md` |\n'
+            )
+        else:
+            project_skill_example = (
+                f'`read_file("/skills/my-workflow/SKILL.md")`'
+            )
+            project_skill_shell = (
+                f'`execute("cat {skills_user_dir}/my-workflow/SKILL.md")`'
+            )
+            activate_skill_step = '2. `read_file("/skills/{name}/SKILL.md")`'
+
+        return f"""## Backend & filesystem self-awareness
+
+You have a **virtual filesystem** backed by multiple storage layers. Path choice matters — using the wrong prefix causes "file not found" or writing to the wrong place.
+
+### Host path mappings
+
+- `/cwd/` -> `{project_root}/`
+- `/skills/` -> `{skills_user_dir}/`
+{project_skills_mapping}- default (`execute` cwd) -> `{project_root}/`
+
+### Golden rules
+
+1. **File tools** (`ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`) → always use **virtual paths** with the correct prefix.
+2. **`execute` (shell)** → use **real host paths** from Host path mappings above. Shell cwd is `{project_root}/`.
+3. **Never mix styles** in one action: `read_file("/cwd/src/main.py")` ✓ but `execute("cat /cwd/src/main.py")` ✗ — shell does not understand `/cwd/`.
+4. **Prefer `/cwd/`** for project files. Do not use bare paths like `/src/main.py` or `src/main.py` unless you have a specific reason.
+5. **`execute` is not sandboxed** — it can read/write anywhere your user can, regardless of virtual path rules. Use carefully.
+
+### Virtual path routing
+
+| Virtual prefix | What it is | Persists? | Example |
+|----------------|------------|-----------|---------|
+| `/cwd/` | Project files (directory you launched from) | On disk | `/cwd/src/my_agent/agent.py` |
+| `/memories/` | Durable personal notes | Across threads & restarts | `/memories/user.md` |
+| `/skills/` | User-scoped skills (`{skills_user_dir}/`) | On disk | `/skills/my-workflow/SKILL.md` |
+{project_skills_row}| `/.agent/` | Internal scratch space for this chat thread | This thread only | `/.agent/scratch.md` |
+| *(no prefix)* | Falls through to default backend (project root) | On disk | `/notes.txt` → project dir (avoid — use `/cwd/` instead) |
+
+### Available backend tools
+
+| Tool | Purpose | Path style |
+|------|---------|------------|
+| `ls` | List directory | Virtual |
+| `read_file` | Read file (supports images) | Virtual |
+| `write_file` | Create/overwrite file | Virtual |
+| `edit_file` | Find-and-replace in file | Virtual |
+| `glob` | Find files by pattern | Virtual |
+| `grep` | Search file contents | Virtual |
+| `execute` | Run shell command on host | **Real paths** in command string |
+
+Destructive file/shell actions (`execute`, `write_file`, `edit_file`) may pause for user approval before running.
+
+### Path translation cheat sheet
+
+| Intent | File tool path | Shell command |
+|--------|----------------|---------------|
+| Read project source | `read_file("/cwd/src/foo.py")` | `execute("cat {project_root}/src/foo.py")` |
+| Run tests | — | `execute("pytest tests/ -q")` |
+| Save a preference | `write_file("/memories/preferences.md", ...)` | *(don't use shell for memories)* |
+| Read a skill | {project_skill_example} | {project_skill_shell} |
+| List project tree | `ls("/cwd/src")` | `execute("ls {project_root}/src")` |
+
+### Common mistakes (avoid these)
+
+| Wrong | Right | Why |
+|-------|-------|-----|
+| `execute("cat /cwd/src/main.py")` | `execute("cat {project_root}/src/main.py")` | Shell doesn't resolve `/cwd/` |
+| `read_file("src/main.py")` | `read_file("/cwd/src/main.py")` | Relative paths are ambiguous |
+| `write_file("/memories/foo.md", ...)` via shell | `write_file("/memories/foo.md", ...)` | `/memories/` is a store, not a normal folder for `cat`/`echo` |
+| `read_file("/skills/tavily-web-search/...")` when skill is in repo | `read_file("/skills/project/tavily-web-search/...")` | Project skills live under `/skills/project/` |
+| Putting secrets in `/memories/` or skills | Reference env var names only | Memories and skills persist locally |
+
+### Where to store what
+
+| Information type | Where | Tool |
+|------------------|-------|------|
+| User preference ("remember my email") | `/memories/user.md` | `write_file` / `edit_file` |
+| Project coding rules | `/cwd/AGENTS.md` | `read_file` / `edit_file` |
+| Repeatable workflow | `/skills/project/{{name}}/SKILL.md` or `/skills/{{name}}/SKILL.md` | `write_file` |
+| Past conversation recall | — | `search_past_conversations` (not filesystem) |
+| Temporary notes for this chat | `/.agent/` | `write_file` (ephemeral) |
+
+### Skills vs filesystem
+
+- At startup you see skill **names and descriptions** only (metadata).
+- When a task matches a skill, **read the full SKILL.md** before acting:
+  - Project skill: `/skills/project/{{name}}/SKILL.md`
+  - User skill: `/skills/{{name}}/SKILL.md`
+- Supporting files (`references/`, `scripts/`) are loaded only when the skill instructions say so.
+
+### Example workflows
+
+**Edit a project file**
+1. `read_file("/cwd/src/my_agent/config.py")`
+2. `edit_file("/cwd/src/my_agent/config.py", old_string="...", new_string="...")`
+3. `execute("pytest tests/test_config.py -q")`
+
+**Remember something for future sessions**
+1. `read_file("/memories/user.md")` (if exists)
+2. `write_file("/memories/user.md", "...")` or `edit_file(...)`
+
+**Run a command in the project**
+1. `execute("pytest tests/ -q")` — shell cwd is already `{project_root}/`
+
+**Activate a skill**
+1. Match task to skill description (e.g. "search the web")
+{activate_skill_step}
+3. Follow the skill's steps using the appropriate tools"""
+
+    def build_path_mappings(self) -> str:
+        """Backward-compatible alias for :meth:`build_backend_awareness`."""
+        return self.build_backend_awareness()
 
 
 def _expand_path(value: str, base: Path) -> Path:
