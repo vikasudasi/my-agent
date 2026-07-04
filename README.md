@@ -2,7 +2,7 @@
 
 **Your personal macOS coding agent — local, persistent, and built to work the way you do.**
 
-my-agent is a terminal-native deep agent powered by [LangChain Deep Agents](https://github.com/langchain-ai/deepagents) and [OpenRouter](https://openrouter.ai/). It runs shell commands, reads and writes files, searches the web, remembers conversations across sessions, and connects to [MCP](https://modelcontextprotocol.io) servers for pluggable tools — all from a fast, streaming REPL.
+my-agent is a terminal-native deep agent powered by [LangChain Deep Agents](https://github.com/langchain-ai/deepagents) and [OpenRouter](https://openrouter.ai/). It runs shell commands, reads and writes files, searches the web, remembers conversations across sessions, connects to [MCP](https://modelcontextprotocol.io) servers — and supports **voice input** plus **JARVIS-style conversation mode** with spoken companion audio on macOS.
 
 Run it from any project directory. Your personal defaults travel with you; project-specific rules and skills load automatically when you're in a repo.
 
@@ -16,7 +16,7 @@ Run it from any project directory. Your personal defaults travel with you; proje
 | **One-shot tasks** | `my-agent run "…"` for scripts, automation, and quick prompts |
 | **Persistent memory** | SQLite checkpoints, durable `/memories/` notes, and semantic search across past chats |
 | **Voice input** | Push-to-talk in chat (`/mic`) or transcribe audio files via OpenRouter STT |
-| **Conversation mode** | Companion audio via `--conversation` — terminal shows full answers, agent speaks brief updates |
+| **Conversation mode** | `--conversation` — JARVIS-style companion audio via macOS TTS; terminal keeps full answers |
 | **MCP integration** | Plug in local and remote MCP servers (stdio, HTTP, SSE, WebSocket) |
 | **Agent skills** | Markdown workflows the agent loads on demand — project or user scoped |
 | **Subagent delegation** | Spawn isolated subagents for complex tasks with live streaming progress |
@@ -37,7 +37,8 @@ Run it from any project directory. Your personal defaults travel with you; proje
 - **MCP server integration** — connect local and remote MCP servers for tools and resources
 - **Subagent delegation** — spawn isolated subagents for complex multi-step work
 - **Web search & fetch** — Tavily integration and page fetching for live information (optional)
-- **Voice input** — push-to-talk in chat or standalone transcription via OpenRouter
+- **Voice input** — push-to-talk in chat (`/mic`) or standalone transcription via OpenRouter
+- **Conversation mode** — spoken companion audio (`speak` tool + macOS TTS) alongside full terminal output
 - **Human-in-the-loop** — optional approval before destructive shell and file actions
 - **Verbose mode** — show reasoning, tool calls, tool results, and loaded skills
 
@@ -50,7 +51,8 @@ Run it from any project directory. Your personal defaults travel with you; proje
 - [uv](https://docs.astral.sh/uv/) or pip
 - [OpenRouter](https://openrouter.ai/) API key
 - Tavily API key (optional, for web search)
-- Voice extras (optional): `pip install -r requirements-voice.txt` or `pip install 'my-agent[voice]'` for push-to-talk capture
+- Voice extras (optional): `pip install -r requirements-voice.txt` for push-to-talk (`/mic`)
+- Conversation mode uses macOS `say` for text-to-speech (no extra pip packages beyond `[voice]` for input)
 
 ---
 
@@ -79,7 +81,8 @@ my-agent chat
 
 ```bash
 my-agent chat --continue          # pick up your last conversation
-my-agent chat --voice             # enable /mic push-to-talk
+my-agent chat --voice             # enable /mic push-to-talk (STT only)
+my-agent chat --conversation      # voice input + spoken companion audio
 my-agent run "Summarize this repo"  # one-shot task
 my-agent transcribe recording.wav   # speech-to-text only
 ```
@@ -143,7 +146,8 @@ Secrets go in `.env` — loaded from `~/.my-agent/.env`, then overridden by `./.
 | `[store]` | `/memories/` persistence (`sqlite` or `memory`) |
 | `[memory]` | Chroma collection and embedding model |
 | `[tavily]` | Web search defaults |
-| `[voice]` | Speech-to-text model, language hint, and capture settings |
+| `[voice]` | Speech-to-text (OpenRouter), push-to-talk capture settings |
+| `[voice.conversation]` | Companion TTS (`speak` tool, macOS `say`, Speaker notes) |
 | `[summarization]` | Auto-summarize long conversations to manage context window |
 | `[display]` | Streaming verbosity defaults |
 | `[mcp]` | MCP server integration (see [MCP Configuration](#mcp-configuration)) |
@@ -166,11 +170,23 @@ Set `enabled = false` to disable.
 
 ---
 
-## Voice input
+## Voice
 
-Speech-to-text runs through OpenRouter's transcription API (same `OPENROUTER_API_KEY`).
+Speech-to-text uses OpenRouter's transcription API (same `OPENROUTER_API_KEY`). Conversation mode adds **text-to-speech** on macOS via the built-in `say` command.
 
-**Interactive chat** — enable with `--voice` or `[voice].enabled = true`:
+### `--voice` vs `--conversation`
+
+| | `--voice` | `--conversation` |
+|--|-----------|------------------|
+| **Input** | Text + optional `/mic` push-to-talk | Text + `/mic` (auto-send, no confirm step) |
+| **Terminal output** | Full agent response | Full agent response (unchanged) |
+| **Audio output** | None | Spoken companion lines via `speak` tool |
+| **Extra deps** | `[voice]` for `/mic` capture | `[voice]` for `/mic`; macOS `say` for TTS |
+| **Use when** | Occasional voice input | Hands-busy sessions; JARVIS-style updates while working |
+
+### Voice input (`--voice`)
+
+Enable with `--voice` or `[voice].enabled = true`:
 
 ```bash
 my-agent chat --voice
@@ -191,28 +207,7 @@ my-agent run "Also check the logs" --audio followup.wav
 my-agent transcribe recording.wav
 ```
 
-Supported formats: wav, mp3, flac, m4a, ogg, webm, aac.
-
-### Conversation mode (companion audio)
-
-Use `--conversation` for a JARVIS-style companion session: the agent speaks **often** \
-during work (acknowledgments, progress before tools, phase changes, wrap-ups) while \
-the terminal shows full detail. Input via keyboard or `/mic`. Companion lines also appear as **Speaker note** lines \
-on screen (what is being spoken aloud), separate from the main assistant answer.
-
-```bash
-my-agent chat --conversation
-```
-
-```toml
-[voice.conversation]
-enabled = false
-tts_backend = "macos"
-tts_voice = ""
-max_speak_chars = 500
-strip_voice_tags_from_terminal = true
-show_speaker_notes = true
-```
+Supported STT formats: wav, mp3, flac, m4a, ogg, webm, aac.
 
 ```toml
 [voice]
@@ -221,6 +216,56 @@ model = "openai/whisper-large-v3"
 language = ""              # ISO-639-1 hint, e.g. "en"; empty = auto-detect
 max_duration_seconds = 120
 confirm_before_send = true
+```
+
+### Conversation mode (`--conversation`)
+
+JARVIS-style companion session: the agent speaks **often** during work (acknowledgments, progress before tools, wrap-ups) while the **terminal always shows the full detailed answer**.
+
+```bash
+my-agent chat --conversation
+```
+
+**Dual channels:**
+
+| Channel | What you get |
+|---------|----------------|
+| **Terminal** | Complete markdown answer — tools, code, lists, details |
+| **Audio + Speaker notes** | Short spoken lines; each queued phrase prints as `Speaker note: "…"` |
+
+**How the agent speaks:**
+
+1. **`speak` tool** — primary mechanism. The agent calls `speak(message="…")` whenever it wants to say something aloud. Use this for mid-turn updates.
+2. **`[voice]…[/voice]` tags** (optional) — short wrap-up in final assistant text. Inner text is spoken and stripped from the main reply (when `strip_voice_tags_from_terminal = true`).
+
+**Do not** expect the agent to write `Speaker note:` in its reply — the CLI prints that label when audio is queued.
+
+**Example turn:**
+
+```
+Tool: speak({"message": "Understood — I'll look that up for you."})
+Speaker note: "Understood — I'll look that up for you."
+
+Tool: tavily_search(...)
+
+Assistant: Here are the top results:
+1. ...
+```
+
+**Tips:**
+
+- Use **headphones** to reduce mic picking up speaker output.
+- Pick a macOS voice: `say -v '?'` lists voices; set `tts_voice` in config (e.g. `Daniel`).
+- Conversation mode skips transcription confirm (`confirm_before_send = false`) for faster turns.
+
+```toml
+[voice.conversation]
+enabled = false            # or use CLI: my-agent chat --conversation
+tts_backend = "macos"      # macOS say (only backend supported today)
+tts_voice = ""             # empty = system default; e.g. "Daniel"
+max_speak_chars = 500      # max length per spoken line
+strip_voice_tags_from_terminal = true
+show_speaker_notes = true  # print Speaker note lines on screen
 ```
 
 ---
@@ -319,7 +364,7 @@ Interactive REPL. Each session prints a `thread_id`. Type `exit` or `quit` to le
 | `--thread-id TEXT` | Resume a specific saved thread |
 | `--continue` | Resume the most recently updated thread |
 | `--voice` | Enable voice input (`/mic` for push-to-talk) |
-| `--conversation` | Voice companion mode: `/mic` input + spoken companion audio |
+| `--conversation` | JARVIS-style companion: `/mic` input + `speak` tool audio (macOS TTS) |
 | `--verbose` | Show reasoning, tool calls, tool results, and loaded skills |
 | `--quiet` | Hide reasoning, tool calls, tool results, and loaded skills |
 
@@ -488,6 +533,9 @@ Example: ask the agent to edit `/cwd/src/main.py` when running from a project di
 my-agent/
 ├── AGENTS.md                  # Agent instructions (injected into system prompt)
 ├── config.toml.example        # Configuration template (includes MCP examples)
+├── requirements.txt           # Base install wrapper
+├── requirements-voice.txt       # Base + [voice] (/mic capture)
+├── requirements-dev.txt         # Voice + pytest
 ├── skills/                    # Project-scoped agent skills
 ├── src/my_agent/
 │   ├── agent.py               # Deep agent setup, MCP tool injection
@@ -502,7 +550,14 @@ my-agent/
 │   ├── terminal_input.py    # REPL input handling
 │   ├── memory/                # Chroma conversation store
 │   ├── middleware/            # Summarization and other middleware
-│   ├── voice/                 # Speech-to-text capture and transcription
+│   ├── voice/                 # Voice input, conversation mode, TTS
+│   │   ├── capture.py         # Push-to-talk mic capture (/mic)
+│   │   ├── transcribe.py      # OpenRouter speech-to-text
+│   │   ├── companion.py       # speak tool + JARVIS conversation prompt
+│   │   ├── queue.py           # Serialized TTS playback queue
+│   │   ├── synthesize.py      # macOS say backend
+│   │   ├── extract.py         # [voice] tag parser for streaming
+│   │   └── notes.py           # Speaker note terminal output
 │   └── tools/
 │       ├── mcp_tools.py       # MCP server tool loading
 │       ├── delegate_task.py   # Subagent delegation
@@ -534,10 +589,10 @@ Optional dependency groups (also available as `requirements*.txt` wrappers):
 | Extra | Install | Purpose |
 |-------|---------|---------|
 | (base) | `pip install -r requirements.txt` | Core agent |
-| `voice` | `pip install -r requirements-voice.txt` | Push-to-talk audio capture in chat |
+| `voice` | `pip install -r requirements-voice.txt` | Push-to-talk capture (`/mic`) |
 | `voice` + `test` | `pip install -r requirements-dev.txt` | Development and pytest |
-| `voice` | `pip install 'my-agent[voice]'` | Same as `requirements-voice.txt` when published |
-| `test` | `pip install 'my-agent[test]'` | pytest and coverage only |
+
+Conversation mode TTS uses macOS `say` (built-in); no separate TTS pip package.
 
 ---
 
