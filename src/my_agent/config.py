@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
+
+_ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
 
 
 _HOME_AGENT_DIR = Path.home() / ".my-agent"
@@ -147,6 +151,42 @@ def _read_agents_md(file_path: Path) -> str | None:
     if file_path.is_file():
         return file_path.read_text(encoding="utf-8").strip()
     return None
+
+
+def _interpolate_env(value: str) -> str:
+    """Replace ``${VAR_NAME}`` placeholders with environment variable values."""
+
+    def _replace(match: re.Match[str]) -> str:
+        var_name = match.group(1).strip()
+        if not var_name:
+            return match.group(0)
+        return os.environ.get(var_name, match.group(0))
+
+    return _ENV_VAR_PATTERN.sub(_replace, value)
+
+
+def _interpolate_env_value(value: Any) -> Any:
+    """Recursively interpolate env vars in MCP config string values."""
+    if isinstance(value, str):
+        return _interpolate_env(value)
+    if isinstance(value, list):
+        return [_interpolate_env_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _interpolate_env_value(item) for key, item in value.items()}
+    return value
+
+
+def _parse_mcp_server(raw: dict[str, Any]) -> MCPServerConfig:
+    """Build an MCPServerConfig with env-var interpolation applied."""
+    headers = raw.get("headers")
+    return MCPServerConfig(
+        name=str(raw["name"]),
+        transport=str(raw.get("transport", "stdio")),
+        command=_interpolate_env_value(raw.get("command")),
+        args=_interpolate_env_value(raw.get("args")),
+        url=_interpolate_env_value(raw.get("url")),
+        headers=_interpolate_env_value(headers) if headers is not None else None,
+    )
 
 
 def _build_system_prompt(
@@ -305,25 +345,10 @@ def load_config(config_path: Path | None = None, env_path: Path | None = None) -
                 other_raw = tomllib.load(handle)
             other_mcp = other_raw.get("mcp", {})
             for s in other_mcp.get("servers", ()):
-                merged_servers[s["name"]] = MCPServerConfig(
-                    name=s["name"],
-                    transport=str(s.get("transport", "stdio")),
-                    command=s.get("command"),
-                    args=s.get("args"),
-                    url=s.get("url"),
-                    headers=s.get("headers"),
-                )
+                merged_servers[s["name"]] = _parse_mcp_server(s)
     # Also add servers from the primary config file (these win on name conflict)
     for s in mcp_section.get("servers", ()):
-        name = s["name"]
-        merged_servers[name] = MCPServerConfig(
-            name=name,
-            transport=str(s.get("transport", "stdio")),
-            command=s.get("command"),
-            args=s.get("args"),
-            url=s.get("url"),
-            headers=s.get("headers"),
-        )
+        merged_servers[s["name"]] = _parse_mcp_server(s)
 
     mcp = MCPConfig(enabled=mcp_enabled, servers=tuple(merged_servers.values()))
 

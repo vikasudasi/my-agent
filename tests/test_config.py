@@ -106,33 +106,58 @@ class TestMessageText:
     """Utility for extracting text from messages."""
 
     def test_extracts_plain_string(self) -> None:
-        from my_agent.runner import _message_text
+        from my_agent.messages import message_text
 
         class FakeMessage:
             content = "Hello world"
 
-        assert _message_text(FakeMessage()) == "Hello world"
+        assert message_text(FakeMessage()) == "Hello world"
 
     def test_extracts_text_blocks(self) -> None:
-        from my_agent.runner import _message_text
+        from my_agent.messages import message_text
 
         class FakeMessage:
             content = [{"type": "text", "text": "Hello"}, {"type": "text", "text": "world"}]
 
-        assert _message_text(FakeMessage()) == "Hello\nworld"
+        assert message_text(FakeMessage()) == "Hello\nworld"
 
     def test_handles_empty_content(self) -> None:
-        from my_agent.runner import _message_text
+        from my_agent.messages import message_text
 
         class FakeMessage:
             content = ""
 
-        assert _message_text(FakeMessage()) == ""
+        assert message_text(FakeMessage()) == ""
 
     def test_handles_unknown_type(self) -> None:
-        from my_agent.runner import _message_text
+        from my_agent.messages import message_text
 
         class FakeMessage:
             content = 42
 
-        assert _message_text(FakeMessage()) == "42"
+        assert message_text(FakeMessage()) == "42"
+
+
+class TestMCPInterpolation:
+    """MCP config values support ${ENV_VAR} substitution."""
+
+    def test_interpolates_header_values(self) -> None:
+        from my_agent.config import _parse_mcp_server
+
+        with patch.dict("os.environ", {"MCP_TOKEN": "secret-token"}):
+            server = _parse_mcp_server(
+                {
+                    "name": "weather",
+                    "transport": "http",
+                    "url": "http://localhost:8000/mcp",
+                    "headers": {"Authorization": "Bearer ${MCP_TOKEN}"},
+                }
+            )
+
+        assert server.headers == {"Authorization": "Bearer secret-token"}
+
+    def test_leaves_missing_env_vars_unchanged(self) -> None:
+        from my_agent.config import _interpolate_env
+
+        with patch.dict("os.environ", {}, clear=True):
+            assert _interpolate_env("Bearer ${MISSING_VAR}") == "Bearer ${MISSING_VAR}"

@@ -8,12 +8,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from langchain_core._api import LangChainBetaWarning
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 from my_agent.config import AppConfig, DisplayConfig
 from my_agent.display import TurnStreamPrinter
 from my_agent.memory.chroma_store import ChromaConversationStore
+from my_agent.messages import extract_messages, latest_assistant_text, message_text
 
 
 @dataclass(frozen=True)
@@ -64,7 +65,7 @@ def run_turn(
                 continue
 
             final_messages = _new_messages(
-                _extract_messages(reply.output),
+                extract_messages(reply.output),
                 messages_before,
             )
             if config.memory.index_on_each_turn and final_messages:
@@ -73,7 +74,7 @@ def run_turn(
                     final_messages,
                     turn_index=turn_index,
                 )
-            return _latest_assistant_text(_extract_messages(reply.output))
+            return latest_assistant_text(extract_messages(reply.output))
 
         result = agent.invoke(stream_input, config=graph_config, version="v2")
         if getattr(result, "interrupts", None):
@@ -82,7 +83,7 @@ def run_turn(
             continue
 
         state = result.value if hasattr(result, "value") else result
-        all_messages = _extract_messages(state)
+        all_messages = extract_messages(state)
         final_messages = _new_messages(all_messages, messages_before)
         if config.memory.index_on_each_turn and final_messages:
             chroma_store.index_messages(
@@ -90,7 +91,7 @@ def run_turn(
                 final_messages,
                 turn_index=turn_index,
             )
-        return _latest_assistant_text(all_messages)
+        return latest_assistant_text(all_messages)
 
 
 class _StreamResult:
@@ -174,21 +175,26 @@ def _read_decision(action: dict[str, Any]) -> dict[str, Any]:
 def _read_edited_action(action: dict[str, Any]) -> dict[str, Any]:
     edited = dict(action)
     args = dict(action.get("arguments", {}))
-    sys.stdout.write("Enter edited arguments as JSON (or press Enter to keep current): ")
-    sys.stdout.flush()
-    raw = sys.stdin.readline().strip()
-    if raw:
-        args.update(json.loads(raw))
+    while True:
+        sys.stdout.write("Enter edited arguments as JSON (or press Enter to keep current): ")
+        sys.stdout.flush()
+        raw = sys.stdin.readline().strip()
+        if not raw:
+            break
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            sys.stdout.write(
+                "Invalid JSON. Try again or press Enter to keep current arguments.\n"
+            )
+            continue
+        if not isinstance(parsed, dict):
+            sys.stdout.write("Edited arguments must be a JSON object.\n")
+            continue
+        args.update(parsed)
+        break
     edited["arguments"] = args
     return edited
-
-
-def _extract_messages(state: Any) -> list[BaseMessage]:
-    if isinstance(state, dict):
-        messages = state.get("messages", [])
-    else:
-        messages = getattr(state, "messages", [])
-    return [message for message in messages if isinstance(message, BaseMessage)]
 
 
 def get_thread_state_info(agent, thread_id: str) -> ThreadStateInfo | None:
@@ -197,7 +203,7 @@ def get_thread_state_info(agent, thread_id: str) -> ThreadStateInfo | None:
         snapshot = agent.get_state(graph_config)
         if not snapshot or not snapshot.values:
             return None
-        messages = _extract_messages(snapshot.values)
+        messages = extract_messages(snapshot.values)
     except Exception:
         return None
 
@@ -208,7 +214,7 @@ def get_thread_state_info(agent, thread_id: str) -> ThreadStateInfo | None:
             continue
         human_turn_count += 1
         if first_user is None:
-            first_user = _message_text(message)
+            first_user = message_text(message)
 
     return ThreadStateInfo(
         message_count=len(messages),
@@ -238,26 +244,9 @@ def _message_text(message: BaseMessage) -> str:
 
 
 def _new_messages(
-    messages: list[BaseMessage],
+    messages: list,
     previous_count: int,
-) -> list[BaseMessage]:
+) -> list:
     if previous_count <= 0:
         return messages
     return messages[previous_count:]
-
-
-def _latest_assistant_text(messages: list[BaseMessage]) -> str:
-    for message in reversed(messages):
-        if isinstance(message, AIMessage):
-            content = message.content
-            if isinstance(content, str):
-                return content
-            if isinstance(content, list):
-                parts = []
-                for block in content:
-                    if isinstance(block, str):
-                        parts.append(block)
-                    elif isinstance(block, dict) and block.get("type") == "text":
-                        parts.append(str(block.get("text", "")))
-                return "\n".join(part for part in parts if part)
-    return ""

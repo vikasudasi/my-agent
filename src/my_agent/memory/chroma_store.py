@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_huggingface import HuggingFaceEmbeddings
 
 from my_agent.config import AppConfig
+from my_agent.messages import snippet as text_snippet, stringify_content
 
 
 @dataclass
@@ -97,8 +98,20 @@ class ChromaConversationStore:
         if not documents:
             return 0
 
-        self._vector_store.add_documents(documents)
+        self._vector_store.add_documents(
+            documents,
+            ids=[str(doc.metadata["message_id"]) for doc in documents],
+        )
         return len(documents)
+
+    def delete_thread(self, thread_id: str) -> int:
+        """Remove all indexed documents for a conversation thread."""
+        collection = self._vector_store._collection
+        raw = collection.get(where={"thread_id": thread_id})
+        ids = raw.get("ids") or []
+        if ids:
+            collection.delete(ids=ids)
+        return len(ids)
 
     def search(self, query: str, limit: int = 5) -> list[ConversationHit]:
         results = self._vector_store.similarity_search_with_score(query, k=limit)
@@ -165,7 +178,7 @@ class ChromaConversationStore:
                 entry["latest_timestamp"] = timestamp
 
             if role == "user" and not entry["first_user_message"]:
-                entry["first_user_message"] = _snippet(content or "", 200)
+                entry["first_user_message"] = text_snippet(content or "", 200) or ""
 
         recent = sorted(
             threads.values(),
@@ -175,36 +188,20 @@ class ChromaConversationStore:
         return recent[:limit]
 
 
+def delete_conversation_index(config: AppConfig, thread_id: str) -> int:
+    """Delete Chroma-indexed messages for a thread. Returns documents removed."""
+    return ChromaConversationStore(config).delete_thread(thread_id)
+
+
 def _message_role_and_content(message: BaseMessage) -> tuple[str, str]:
     if isinstance(message, HumanMessage):
-        return "user", _stringify_content(message.content)
+        return "user", stringify_content(message.content)
     if isinstance(message, AIMessage):
-        return "assistant", _stringify_content(message.content)
+        return "assistant", stringify_content(message.content)
     if isinstance(message, ToolMessage):
-        return "tool", _stringify_content(message.content)
+        return "tool", stringify_content(message.content)
     message_type = getattr(message, "type", message.__class__.__name__)
-    return str(message_type), _stringify_content(getattr(message, "content", ""))
-
-
-def _stringify_content(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict):
-                if block.get("type") == "text":
-                    parts.append(str(block.get("text", "")))
-                else:
-                    parts.append(json.dumps(block, ensure_ascii=True))
-            else:
-                parts.append(str(block))
-        return "\n".join(part for part in parts if part)
-    if content is None:
-        return ""
-    return str(content)
+    return str(message_type), stringify_content(getattr(message, "content", ""))
 
 
 def _message_id(thread_id: str, turn_index: int, role: str, content: str) -> str:
@@ -214,8 +211,3 @@ def _message_id(thread_id: str, turn_index: int, role: str, content: str) -> str
     return f"{thread_id}-{turn_index}-{role}-{digest}"
 
 
-def _snippet(text: str, max_len: int) -> str:
-    cleaned = " ".join(text.split())
-    if len(cleaned) <= max_len:
-        return cleaned
-    return cleaned[: max_len - 3] + "..."

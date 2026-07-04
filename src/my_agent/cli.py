@@ -18,6 +18,7 @@ from my_agent.checkpoint import (
 )
 from my_agent.config import DisplayConfig, load_config
 from my_agent.help_text import render_help
+from my_agent.messages import snippet as text_snippet
 from my_agent.runner import get_thread_state_info, run_turn
 from my_agent.store import list_memories, read_memory
 
@@ -119,12 +120,7 @@ def _initial_turn_index(agent, thread_id: str) -> int:
 
 
 def _snippet(text: str | None, *, max_len: int = 72) -> str:
-    if not text:
-        return "(no user message)"
-    compact = " ".join(text.split())
-    if len(compact) <= max_len:
-        return compact
-    return f"{compact[: max_len - 1]}…"
+    return text_snippet(text, max_len, empty="(no user message)") or "(no user message)"
 
 
 @app.command("help")

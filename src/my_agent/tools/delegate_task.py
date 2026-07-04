@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import sys
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 
 from my_agent.config import AppConfig
 from my_agent.display import TurnStreamPrinter
 from my_agent.memory.chroma_store import ChromaConversationStore
+from my_agent.messages import extract_messages, latest_assistant_text
+
+logger = logging.getLogger(__name__)
 
 
 def build_delegate_task_tool(
@@ -80,12 +84,11 @@ def build_delegate_task_tool(
                 if output is None:
                     result = "[Subagent produced no output]"
                 else:
-                    messages = _extract_messages(output)
-                    result = _latest_assistant_text(messages)
-        except Exception:
-            import traceback
-
-            result = f"[Subagent error: {traceback.format_exc()}]"
+                    messages = extract_messages(output)
+                    result = latest_assistant_text(messages)
+        except Exception as exc:
+            logger.exception("Subagent failed for task delegation")
+            result = f"[Subagent error: {type(exc).__name__}: {exc}]"
 
         sys.stdout.write(
             "━" * 28
@@ -98,30 +101,3 @@ def build_delegate_task_tool(
         return result
 
     return delegate_task
-
-
-def _extract_messages(state: object) -> list[BaseMessage]:
-    """Extract BaseMessage list from an agent state object."""
-    if isinstance(state, dict):
-        messages = state.get("messages", [])
-    else:
-        messages = getattr(state, "messages", [])
-    return [m for m in messages if isinstance(m, BaseMessage)]
-
-
-def _latest_assistant_text(messages: list[BaseMessage]) -> str:
-    """Get the content of the most recent AI message."""
-    for message in reversed(messages):
-        if isinstance(message, AIMessage):
-            content = message.content
-            if isinstance(content, str):
-                return content
-            if isinstance(content, list):
-                parts = []
-                for block in content:
-                    if isinstance(block, str):
-                        parts.append(block)
-                    elif isinstance(block, dict) and block.get("type") == "text":
-                        parts.append(str(block.get("text", "")))
-                return "\n".join(part for part in parts if part)
-    return ""
