@@ -21,6 +21,11 @@ from my_agent.help_text import render_help
 from my_agent.messages import snippet as text_snippet
 from my_agent.runner import get_thread_state_info, run_turn
 from my_agent.store import list_memories, read_memory
+from my_agent.terminal_input import (
+    disable_bracketed_paste,
+    enable_bracketed_paste,
+    read_input,
+)
 from my_agent.voice import TranscriptionError, capture_and_transcribe, transcribe_file
 
 app = typer.Typer(
@@ -175,7 +180,7 @@ def _read_chat_input(*, voice_enabled: bool, voice_config) -> str | None:
     prompt += ": "
 
     try:
-        user_input = _console.input(prompt)
+        user_input = read_input(_console, prompt)
     except (EOFError, KeyboardInterrupt):
         raise
 
@@ -463,6 +468,31 @@ def chat(
 
     _print_chat_banner(agent, active_thread, is_resume=is_resume, voice_enabled=voice_enabled)
 
+    enable_bracketed_paste()
+    try:
+        _chat_loop(
+            agent=agent,
+            app_config=app_config,
+            chroma_store=chroma_store,
+            display=display,
+            voice_enabled=voice_enabled,
+            active_thread=active_thread,
+            turn_index=turn_index,
+        )
+    finally:
+        disable_bracketed_paste()
+
+
+def _chat_loop(
+    *,
+    agent,
+    app_config,
+    chroma_store,
+    display,
+    voice_enabled: bool,
+    active_thread: str,
+    turn_index: int,
+) -> None:
     while True:
         try:
             user_input = _read_chat_input(
@@ -497,7 +527,7 @@ def chat(
             _console.print()
             _console.print("[yellow]Interrupted. Type your correction or press Enter to discard:[/yellow]")
             try:
-                correction = _console.input("[bold yellow]Redirect:[/bold yellow] ")
+                correction = read_input(_console, "[bold yellow]Redirect:[/bold yellow] ")
             except (EOFError, KeyboardInterrupt):
                 _console.print("\n[dim]Discarded.[/dim]")
                 _console.print()
